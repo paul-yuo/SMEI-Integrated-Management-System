@@ -8,7 +8,7 @@ import { RequestForSupply, RFSItem, User, UserRole } from "../types";
 import { api } from "../lib/api";
 import { Search, Plus, Filter, Calendar, FileText, ArrowUpDown, Trash2, Edit3, Eye, FileSpreadsheet, X, Download, Trash } from "lucide-react";
 import { exportWordWithTemplate, exportExcelWithTemplate } from "../utils/templateExport";
-import { ExportExcelButton, CreateButton, exportListToExcel } from "./SharedButtons";
+import { ExportExcelButton, CreateButton } from "./SharedButtons";
 import { TableSkeleton } from "./ui/Skeleton";
 
 interface RFSModuleProps {
@@ -32,6 +32,7 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
   const [selectedRequest, setSelectedRequest] = useState<RequestForSupply | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [activeRfsId, setActiveRfsId] = useState<string | null>(null);
+  const [selectedRFS, setSelectedRFS] = useState<RequestForSupply | null>(null);
 
   // Form State
   const [rfsNumber, setRfsNumber] = useState("");
@@ -382,18 +383,16 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
     Irregular: "bg-amber-50 text-amber-700 border-amber-200"
   };
 
-  const handleExportExcel = () => {
-    const dataToExport = filteredRequests.map(rfs => ({
-      "RFS Number": rfs.rfsNumber,
-      "Date": rfs.dateRequested,
-      "Due Date": rfs.dueDate,
-      "Department": rfs.department,
-      "Mode": rfs.modeOfRequest,
-      "Status": rfs.status,
-      "Items Count": rfs.items.length
-    }));
-    exportListToExcel(dataToExport, "Request_For_Supply");
-  };
+const handleExportExcel = async () => {
+
+    if (!selectedRFS) {
+        alert("Please select one Request for Supply first.");
+        return;
+    }
+
+    await handleExport(selectedRFS, "excel");
+
+};
 
   return (
     <div id="smei-rfs-list" className="p-6 md:p-10 space-y-6 max-w-7xl mx-auto">
@@ -505,18 +504,14 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
               </tr>
             ) : (
               filteredRequests.map((req, idx) => (
-                <tr
-                  key={req.id}
-                  onClick={() => setActiveRfsId(req.id)}
-                  onDoubleClick={() => handleOpenModal(req, false)}
-                  className={`cursor-pointer transition-all border-b border-gray-50/60 group ${
-                    activeRfsId === req.id
-                      ? "bg-red-600/20 border-l-4 border-l-smei-crimson font-medium"
-                      : idx % 2 === 1
-                      ? "bg-gray-50/30 hover:bg-red-600/10"
-                      : "bg-white hover:bg-red-600/10"
-                  }`}
-                  title="Double-click to View details"
+               <tr
+                    key={req.id}
+                    onClick={() => setSelectedRFS(req)}
+                    className={`cursor-pointer ${
+                        selectedRFS?.id === req.id
+                            ? "bg-red-50"
+                            : ""
+                    }`}
                 >
                   <td className="py-3 px-6 font-mono font-bold text-smei-darkred">
                     <div className="flex items-center gap-2">

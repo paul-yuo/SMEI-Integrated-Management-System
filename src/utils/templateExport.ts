@@ -98,6 +98,9 @@ function resolveSharedFormulas(worksheet: ExcelJS.Worksheet) {
  * Reusable Excel (.xlsx) Template Export Service
  * Supports row cloning for items grids, rich text cells, and template trimming
  */
+
+
+
 export async function exportExcelWithTemplate(
   templateName: string,
   data: Record<string, any>,
@@ -116,6 +119,13 @@ export async function exportExcelWithTemplate(
     const buffer = await response.arrayBuffer();
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(buffer);
+    console.log("========== TEMPLATE LOADED ==========");
+    console.log("Template:", templateName);
+    console.log("Worksheets:", workbook.worksheets.length);
+    console.log("Sheet Name:", workbook.worksheets[0].name);
+    console.log("BB1 =", workbook.worksheets[0].getCell("BB1").value);
+    console.log("T8 =", workbook.worksheets[0].getCell("T8").value);
+    console.log("I13 =", workbook.worksheets[0].getCell("I13").value);
     
     workbook.eachSheet((worksheet) => {
       // 1. Resolve shared formulas immediately to prevent save corruption errors
@@ -319,6 +329,10 @@ export async function exportExcelWithTemplate(
     // Save generated file in browser using file-saver (resilient in sandboxes)
     const outBuffer = await workbook.xlsx.writeBuffer();
     const outBlob = new Blob([outBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    console.log("========== BEFORE SAVE ==========");
+    console.log("BB1 =", workbook.worksheets[0].getCell("BB1").value);
+    console.log("T8 =", workbook.worksheets[0].getCell("T8").value);
+    console.log("I13 =", workbook.worksheets[0].getCell("I13").value);
     saveAs(outBlob, outputFilename);
   } catch (error: any) {
     console.error("Excel Export Error:", error);
