@@ -29,10 +29,20 @@ import {
 export default function UserManagement() {
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Array<{ id: string; name: string }>>([]);
+  const [rolesList, setRolesList] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+
+  const defaultRolesList = ["Purchasing Staff", "Department Head", "Accounting Staff", "Director", "Viewer", "Administrator"];
+  const getDisplayRoles = () => {
+    if (rolesList && rolesList.length > 0) {
+      // Return distinct sorted names
+      return Array.from(new Set(rolesList.map(r => r.name)));
+    }
+    return defaultRolesList;
+  };
 
   // Modals state
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -79,6 +89,12 @@ export default function UserManagement() {
       setUsers(data);
       const depts = await api.getDepartments();
       setDepartments(depts);
+      try {
+        const fetchedRoles = await api.getRoles();
+        setRolesList(fetchedRoles);
+      } catch (roleErr) {
+        console.warn("Failed to load roles in UserManagement, using defaults:", roleErr);
+      }
     } catch (err: any) {
       setError(err.message || "Failed to load users");
     } finally {
@@ -421,6 +437,8 @@ export default function UserManagement() {
                             className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold ${
                               statusVal === "Active"
                                 ? "bg-green-50 text-green-700 border border-green-100"
+                                : statusVal === "Pending"
+                                ? "bg-blue-50 text-blue-700 border border-blue-100"
                                 : statusVal === "Locked"
                                 ? "bg-yellow-50 text-yellow-700 border border-yellow-100"
                                 : "bg-gray-50 text-gray-700 border border-gray-100"
@@ -431,43 +449,72 @@ export default function UserManagement() {
                         </td>
                         <td className="p-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
-                            {statusVal === "Locked" && (
-                              <button
-                                onClick={() => handleUnlockUser(user)}
-                                className="p-1.5 text-yellow-600 hover:bg-yellow-50 rounded-lg transition-all"
-                                title="Unlock Account"
-                              >
-                                <Unlock className="w-4 h-4" />
-                              </button>
+                            {statusVal === "Pending" ? (
+                              <>
+                                <button
+                                  onClick={async () => {
+                                    try {
+                                      await api.updateUser(user.id, { status: "Active" });
+                                      setSuccess();
+                                      fetchUsers();
+                                    } catch(err: any) { setError(err.message); }
+                                  }}
+                                  className="px-2 py-1 bg-green-100 text-green-700 text-[10px] font-bold rounded hover:bg-green-200 uppercase"
+                                >
+                                  Approve
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    try {
+                                      await api.updateUser(user.id, { status: "Disabled" });
+                                      setSuccess();
+                                      fetchUsers();
+                                    } catch(err: any) { setError(err.message); }
+                                  }}
+                                  className="px-2 py-1 bg-red-100 text-red-700 text-[10px] font-bold rounded hover:bg-red-200 uppercase"
+                                >
+                                  Reject
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                {statusVal === "Locked" && (
+                                  <button
+                                    onClick={() => handleUnlockUser(user)}
+                                    className="p-1.5 text-yellow-600 hover:bg-yellow-50 rounded-lg transition-all"
+                                    title="Unlock Account"
+                                  >
+                                    <Unlock className="w-4 h-4" />
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => openEditModal(user)}
+                                  className="p-1.5 text-gray-600 hover:bg-gray-100 rounded-lg transition-all"
+                                  title="Edit Profile"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => openResetModal(user)}
+                                  className="p-1.5 text-gray-600 hover:bg-gray-100 rounded-lg transition-all"
+                                  title="Reset Password"
+                                >
+                                  <Key className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => toggleUserStatus(user, statusVal)}
+                                  className={`p-1.5 rounded-lg transition-all ${
+                                    statusVal === "Active"
+                                      ? "text-red-600 hover:bg-red-50"
+                                      : "text-green-600 hover:bg-green-50"
+                                  }`}
+                                  title={statusVal === "Active" ? "Disable Account" : "Activate Account"}
+                                >
+                                  {statusVal === "Active" ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
+                                </button>
+                              </>
                             )}
-                            <button
-                              onClick={() => openEditModal(user)}
-                              className="p-1.5 text-gray-600 hover:bg-gray-100 rounded-lg transition-all"
-                              title="Edit Profile"
-                            >
-                              <Edit2 className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => openResetModal(user)}
-                              className="p-1.5 text-gray-600 hover:bg-gray-100 rounded-lg transition-all"
-                              title="Reset Password"
-                            >
-                              <Key className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => toggleUserStatus(user, statusVal)}
-                              className={`p-1.5 rounded-lg transition-all ${
-                                statusVal === "Active"
-                                  ? "text-red-600 hover:bg-red-50"
-                                  : "text-green-600 hover:bg-green-50"
-                              }`}
-                              title={statusVal === "Active" ? "Disable Account" : "Activate Account"}
-                            >
-                              {statusVal === "Active" ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
+                          </div></td></tr>
                     );
                   })
                 )}
@@ -616,12 +663,9 @@ export default function UserManagement() {
                     onChange={(e) => setFormData({ ...formData, role: e.target.value })}
                     className="w-full px-3.5 py-2 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-smei-crimson"
                   >
-                    <option value="Purchasing Staff">Purchasing Staff</option>
-                    <option value="Department Head">Department Head</option>
-                    <option value="Accounting Staff">Accounting Staff</option>
-                    <option value="Director">Director</option>
-                    <option value="Viewer">Viewer</option>
-                    <option value="Administrator">Administrator</option>
+                    {getDisplayRoles().map((rName) => (
+                      <option key={rName} value={rName}>{rName}</option>
+                    ))}
                   </select>
                 </div>
                 <div>
@@ -729,12 +773,9 @@ export default function UserManagement() {
                     onChange={(e) => setEditFormData({ ...editFormData, role: e.target.value })}
                     className="w-full px-3.5 py-2 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-smei-crimson"
                   >
-                    <option value="Purchasing Staff">Purchasing Staff</option>
-                    <option value="Department Head">Department Head</option>
-                    <option value="Accounting Staff">Accounting Staff</option>
-                    <option value="Director">Director</option>
-                    <option value="Viewer">Viewer</option>
-                    <option value="Administrator">Administrator</option>
+                    {getDisplayRoles().map((rName) => (
+                      <option key={rName} value={rName}>{rName}</option>
+                    ))}
                   </select>
                 </div>
                 <div>
@@ -867,12 +908,9 @@ export default function UserManagement() {
                       onChange={(e) => setLinkConfig({ ...linkConfig, role: e.target.value })}
                       className="w-full px-3.5 py-2 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-smei-crimson appearance-none cursor-pointer"
                     >
-                      <option value="Purchasing Staff">Purchasing Staff</option>
-                      <option value="Department Head">Department Head</option>
-                      <option value="Accounting Staff">Accounting Staff</option>
-                      <option value="Director">Director</option>
-                      <option value="Viewer">Viewer</option>
-                      <option value="Administrator">Administrator</option>
+                      {getDisplayRoles().map((rName) => (
+                        <option key={rName} value={rName}>{rName}</option>
+                      ))}
                     </select>
                   </div>
                   <div>

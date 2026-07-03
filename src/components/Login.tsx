@@ -15,10 +15,15 @@ interface LoginProps {
 }
 
 export default function Login({ onLoginSuccess }: LoginProps) {
+  const [isRegistering, setIsRegistering] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [department, setDepartment] = useState("ADMIN");
+  const [departmentOthers, setDepartmentOthers] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [successMsg, setSuccessMsg] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [logoError, setLogoError] = useState(false);
 
@@ -28,8 +33,8 @@ export default function Login({ onLoginSuccess }: LoginProps) {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setSuccessMsg("");
     setIsLoading(true);
-
     try {
       const response = await api.login(username.trim(), password);
       onLoginSuccess(response.user);
@@ -40,7 +45,40 @@ export default function Login({ onLoginSuccess }: LoginProps) {
     }
   };
 
-  return (
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setSuccessMsg("");
+    
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters long.");
+      return;
+    }
+    
+    const finalDepartment = department === "OTHERS" ? departmentOthers : department;
+    if (department === "OTHERS" && !departmentOthers.trim()) {
+      setError("Please specify your department.");
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const response = await api.registerPublicUser({
+        username: username.trim(),
+        password,
+        fullName: fullName.trim(),
+        department: finalDepartment
+      });
+      setSuccessMsg(response.message || "Registration successful. Please wait for an administrator to approve your account.");
+      setIsRegistering(false);
+      setPassword(""); // Clear password
+    } catch (err: any) {
+      setError(err.message || "Failed to register.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+return (
     <div id="smei-login-container" className="min-h-screen bg-gray-50 flex items-center justify-center p-4 sm:p-6 md:p-10">
       <motion.div
         initial={{ opacity: 0, y: 15 }}
@@ -92,12 +130,25 @@ export default function Login({ onLoginSuccess }: LoginProps) {
           </div>
         </div>
 
-        {/* Right Panel: Login Form (Strict RBAC Credentials) */}
-        <div className="p-8 md:p-12 flex-1 flex flex-col justify-center bg-white">
+        {/* Right Panel: Login/Register Form */}
+        <div className="p-8 md:p-12 flex-1 flex flex-col justify-center bg-white h-[600px] overflow-y-auto">
           <div>
-            <div className="mb-6">
-              <h3 className="text-2xl font-bold text-gray-800 font-display">System Portal Login</h3>
-              <p className="text-sm text-gray-500 mt-1">Please enter your credentials to access POMS dashboard</p>
+            <div className="mb-6 flex justify-between items-center">
+              <div>
+                <h3 className="text-2xl font-bold text-gray-800 font-display">
+                  {isRegistering ? "Create Account" : "System Portal Login"}
+                </h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  {isRegistering ? "Register for POMS access" : "Please enter your credentials to access POMS dashboard"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setIsRegistering(!isRegistering); setError(""); setSuccessMsg(""); }}
+                className="text-xs font-semibold text-smei-crimson hover:text-red-700 underline"
+              >
+                {isRegistering ? "Back to Login" : "Register"}
+              </button>
             </div>
 
             {error && (
@@ -106,8 +157,29 @@ export default function Login({ onLoginSuccess }: LoginProps) {
                 <span>{error}</span>
               </div>
             )}
+            {successMsg && (
+              <div className="mb-5 bg-green-50 border border-green-200 text-green-700 text-xs px-4 py-3 rounded-xl flex items-start gap-2">
+                <span>{successMsg}</span>
+              </div>
+            )}
 
-            <form onSubmit={handleLogin} className="space-y-4">
+            <form onSubmit={isRegistering ? handleRegister : handleLogin} className="space-y-4">
+              {isRegistering && (
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">
+                    Full Name
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    placeholder="Enter full name"
+                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-sans focus:outline-none focus:ring-2 focus:ring-smei-crimson focus:border-transparent focus:bg-white transition-all"
+                  />
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">
                   Username
@@ -124,6 +196,36 @@ export default function Login({ onLoginSuccess }: LoginProps) {
                   />
                 </div>
               </div>
+
+              {isRegistering && (
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">
+                    Department
+                  </label>
+                  <select
+                    value={department}
+                    onChange={(e) => setDepartment(e.target.value)}
+                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-sans focus:outline-none focus:ring-2 focus:ring-smei-crimson focus:border-transparent focus:bg-white transition-all"
+                  >
+                    <option value="ADMIN">ADMIN</option>
+                    <option value="TECHNICAL">TECHNICAL</option>
+                    <option value="ACCOUNTING">ACCOUNTING</option>
+                    <option value="OM SALES">OM SALES</option>
+                    <option value="SALES">SALES</option>
+                    <option value="OTHERS">OTHERS</option>
+                  </select>
+                  {department === "OTHERS" && (
+                    <input
+                      type="text"
+                      required
+                      value={departmentOthers}
+                      onChange={(e) => setDepartmentOthers(e.target.value)}
+                      placeholder="Specify department"
+                      className="w-full mt-2 px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-sans focus:outline-none focus:ring-2 focus:ring-smei-crimson focus:border-transparent focus:bg-white transition-all"
+                    />
+                  )}
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">
@@ -160,14 +262,13 @@ export default function Login({ onLoginSuccess }: LoginProps) {
                   ) : (
                     <>
                       <LogIn className="w-4 h-4" />
-                      <span>Access System Securely</span>
+                      <span>{isRegistering ? "Register Account" : "Access System Securely"}</span>
                     </>
                   )}
                 </button>
               </div>
             </form>
           </div>
-
           <div className="mt-8 border-t border-gray-100 pt-6">
             <p className="text-[11px] text-gray-400 leading-normal text-center">
               Protected by military-grade encryption and secure access controls. Unauthorized connection attempts will be logged and reported to Security <strong className="font-bold">Operations</strong>.

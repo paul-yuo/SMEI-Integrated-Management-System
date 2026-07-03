@@ -865,10 +865,9 @@ export default function SuppliersList({
                   {/* Plant Address */}
                   <div className="space-y-1">
                     <label className="block font-bold text-gray-600 uppercase tracking-wide">
-                      CEZ Plant Address <span className="text-smei-crimson font-bold ml-0.5">*</span>
+                      ADDRESS:
                     </label>
                     <textarea
-                      required
                       rows={3}
                       value={address}
                       onChange={(e) => setAddress(e.target.value)}

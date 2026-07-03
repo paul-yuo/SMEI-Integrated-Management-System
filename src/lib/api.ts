@@ -119,6 +119,13 @@ export const api = {
     return apiFetch<Array<{ id: string; name: string; permissions: string[] }>>("/api/roles");
   },
 
+  async createRole(name: string, permissions: string[] = []): Promise<{ id: string; name: string; permissions: string[] }> {
+    return apiFetch<{ id: string; name: string; permissions: string[] }>("/api/roles", {
+      method: "POST",
+      body: JSON.stringify({ name, permissions })
+    });
+  },
+
   async updateRolePermissions(id: string, permissions: string[]): Promise<{ id: string; name: string; permissions: string[] }> {
     return apiFetch<{ id: string; name: string; permissions: string[] }>(`/api/roles/${id}`, {
       method: "PUT",
@@ -304,6 +311,18 @@ export const api = {
     });
     setToken(data.token);
     return data;
+  },
+
+  async registerPublicUser(registerData: {
+    username: string;
+    password?: string;
+    fullName: string;
+    department: string;
+  }): Promise<{ message: string }> {
+    return apiFetch<{ message: string }>("/api/auth/register-public", {
+      method: "POST",
+      body: JSON.stringify(registerData)
+    });
   },
 
   // Payment Instruction Slips (PIS)

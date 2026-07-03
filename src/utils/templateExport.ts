@@ -9,6 +9,20 @@ import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 
 /**
+ * Helper to clean split placeholders {{...}} in the XML template before replacement
+ */
+function cleanSplitPlaceholders(xml: string): string {
+  let cleaned = xml.replace(/<w:proofErr\b[^>]*\/>/g, "");
+  const splitRegex = /(\{\{[^}]+?)<\/w:t><\/w:r>(?:<w:proofErr\b[^>]*\/>)?<w:r\b[^>]*>(?:<w:rPr>[^]*?<\/w:rPr>)?<w:t\b[^>]*>([^}]*?\}\})/g;
+  let prevCleaned;
+  do {
+    prevCleaned = cleaned;
+    cleaned = cleaned.replace(splitRegex, "$1$2");
+  } while (cleaned !== prevCleaned);
+  return cleaned;
+}
+
+/**
  * Reusable Word (.docx) Template Export Service
  */
 export async function exportWordWithTemplate(
@@ -17,16 +31,66 @@ export async function exportWordWithTemplate(
   outputFilename: string
 ) {
   try {
-    let response = await fetch(`/templates/${templateName}`);
+    console.log("===== TEMPLATE EXPORT STARTED =====");
+    console.log("Template:", templateName);
+    
+    // Support cache-busting for PO_TEMPLATE.docx to avoid old cached templates
+    const fetchUrl = templateName === "PO_TEMPLATE.docx"
+      ? `/templates/PO_TEMPLATE.docx?t=${Date.now()}`
+      : `/templates/${templateName}`;
+      
+    let response = await fetch(fetchUrl);
     if (!response.ok) {
-      response = await fetch(`/${templateName}`);
+      const fallbackUrl = templateName === "PO_TEMPLATE.docx"
+        ? `/PO_TEMPLATE.docx?t=${Date.now()}`
+        : `/${templateName}`;
+      response = await fetch(fallbackUrl);
     }
+    
     if (!response.ok) {
       throw new Error(`Unable to export because the template '${templateName}' was not found in public/templates/ or public/.`);
     }
+    
     const arrayBuffer = await response.arrayBuffer();
+    
+    // Add required debugging immediately after loading the template
+    if (templateName === "PO_TEMPLATE.docx") {
+      console.log("Loading Purchase Order template...");
+      console.log("Template:", templateName);
+    }
+    
     const zip = new PizZip(arrayBuffer);
+
+    // Apply XML-level corrections for templates
+    if (templateName === "CANVASS_TEMPLATE.docx") {
+      let docXml = zip.files["word/document.xml"].asText();
+      
+      // Fix split curly braces in Category and Plate_No fields
+      docXml = docXml.replace(/<w:t>\{<\/w:t>[\s\S]*?<w:t>\{<\/w:t>([\s\S]*?<w:t>Category<\/w:t>)/, "<w:t>{{</w:t>$1");
+      docXml = docXml.replace(/<w:t>\{<\/w:t>[\s\S]*?<w:t>\{<\/w:t>([\s\S]*?<w:t>Plate_No<\/w:t>)/, "<w:t>{{</w:t>$1");
+      
+      // Fix parenthesis typos in contact_no placeholders
+      docXml = docXml.replace(/\(\(contact_no/g, "{{contact_no");
+      
+      // Strip formatting tags and whitespaces within placeholders
+      docXml = docXml.replace(/\{\{([^{}]*?)\}\}/g, (match) => {
+        return match.replace(/<[^>]+>/g, "").replace(/\s+/g, "");
+      });
+      
+      zip.file("word/document.xml", docXml);
+    } else if (templateName === "PO_TEMPLATE.docx") {
+      let docXml = zip.files["word/document.xml"].asText();
+      docXml = cleanSplitPlaceholders(docXml);
+      zip.file("word/document.xml", docXml);
+    }
+
+    // Add required debugging for PO export data before rendering
+    if (templateName === "PO_TEMPLATE.docx") {
+      console.log(data);
+    }
+
     const doc = new Docxtemplater(zip, {
+      delimiters: { start: "{{", end: "}}" },
       paragraphLoop: true,
       linebreaks: true,
     });
@@ -109,6 +173,9 @@ export async function exportExcelWithTemplate(
   outputFilename: string
 ) {
   try {
+    console.log("Template:", templateName);
+    console.log("Output:", outputFilename);
+    console.log("Data:", data);
     let response = await fetch(`/templates/${templateName}`);
     if (!response.ok) {
       response = await fetch(`/${templateName}`);
@@ -118,15 +185,212 @@ export async function exportExcelWithTemplate(
     }
     const buffer = await response.arrayBuffer();
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(buffer);
-    console.log("========== TEMPLATE LOADED ==========");
-    console.log("Template:", templateName);
-    console.log("Worksheets:", workbook.worksheets.length);
-    console.log("Sheet Name:", workbook.worksheets[0].name);
-    console.log("BB1 =", workbook.worksheets[0].getCell("BB1").value);
-    console.log("T8 =", workbook.worksheets[0].getCell("T8").value);
-    console.log("I13 =", workbook.worksheets[0].getCell("I13").value);
     
+    let templateLoaded = true;
+    try {
+      await workbook.xlsx.load(buffer);
+      console.log("========== TEMPLATE LOADED ==========");
+      console.log("Template:", templateName);
+    } catch (loadError) {
+      console.warn("Template load error, falling back to basic export:", loadError);
+      templateLoaded = false;
+    }
+
+    if (!templateLoaded) {
+      const ws = workbook.addWorksheet("Export Data");
+      let rowIdx = 1;
+      for (const [k, v] of Object.entries(data)) {
+        if (k !== itemsKey && typeof v !== "object") {
+          ws.getCell(`A${rowIdx}`).value = k;
+          ws.getCell(`B${rowIdx}`).value = v;
+          rowIdx++;
+        }
+      }
+      rowIdx++;
+      if (items && items.length > 0) {
+        const keys = Object.keys(items[0]);
+        keys.forEach((k, colIdx) => {
+          ws.getCell(rowIdx, colIdx + 1).value = k;
+        });
+        rowIdx++;
+        items.forEach((item) => {
+          keys.forEach((k, colIdx) => {
+            ws.getCell(rowIdx, colIdx + 1).value = item[k];
+          });
+          rowIdx++;
+        });
+      }
+      const outBuffer = await workbook.xlsx.writeBuffer();
+      const outBlob = new Blob([outBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      saveAs(outBlob, outputFilename);
+      return;
+    }
+
+    // ADVANCED CLONING ENGINE FOR CANVASS SHEET MODULE
+    if (templateName === "CANVASS_TEMPLATE.xlsx") {
+      const ws = workbook.worksheets[0];
+      resolveSharedFormulas(ws);
+
+      const shops = data.shops || [
+        {
+          name: data.SUPPLIER_NAME || "Supplier A",
+          contact_person: data.CONTACT || "",
+          contact_no: data.PHONE || "",
+          work_duration: "",
+          warranty: "",
+          payment_terms: "",
+          prices: items.map(it => it.supplierAPrice || 0),
+          total: items.reduce((sum, it) => sum + ((it.supplierAPrice || 0) * (it.quantity || 0)), 0),
+          vat: 0,
+          total_amount: items.reduce((sum, it) => sum + ((it.supplierAPrice || 0) * (it.quantity || 0)), 0)
+        },
+        {
+          name: "Supplier B",
+          contact_person: "",
+          contact_no: "",
+          work_duration: "",
+          warranty: "",
+          payment_terms: "",
+          prices: items.map(it => it.supplierBPrice || 0),
+          total: items.reduce((sum, it) => sum + ((it.supplierBPrice || 0) * (it.quantity || 0)), 0),
+          vat: 0,
+          total_amount: items.reduce((sum, it) => sum + ((it.supplierBPrice || 0) * (it.quantity || 0)), 0)
+        },
+        {
+          name: "Supplier C",
+          contact_person: "",
+          contact_no: "",
+          work_duration: "",
+          warranty: "",
+          payment_terms: "",
+          prices: items.map(it => it.supplierCPrice || 0),
+          total: items.reduce((sum, it) => sum + ((it.supplierCPrice || 0) * (it.quantity || 0)), 0),
+          vat: 0,
+          total_amount: items.reduce((sum, it) => sum + ((it.supplierCPrice || 0) * (it.quantity || 0)), 0)
+        }
+      ];
+
+      const N = shops.length;
+
+      // 1. Dynamic Column Expansion
+      if (N > 2) {
+        for (let s = 2; s < N; s++) {
+          const targetColIdx = 5 + s;
+          ws.spliceColumns(targetColIdx, 0, []);
+          ws.getColumn(targetColIdx).width = ws.getColumn(6).width;
+
+          // Copy cell styling, values, borders, and fonts from Column 6 (F) to targetColIdx
+          for (let r = 1; r <= ws.rowCount; r++) {
+            const fromCell = ws.getRow(r).getCell(6);
+            const toCell = ws.getRow(r).getCell(targetColIdx);
+            
+            toCell.style = JSON.parse(JSON.stringify(fromCell.style || {}));
+            
+            const val = fromCell.value;
+            if (typeof val === "string") {
+              const newVal = val.replace(/_name2\}\}/g, `_name${s + 1}}}`)
+                              .replace(/_person2\}\}/g, `_person${s + 1}}}`)
+                              .replace(/_no2\}\}/g, `_no${s + 1}}}`)
+                              .replace(/_duration2\}\}/g, `_duration${s + 1}}}`)
+                              .replace(/_terms2\}\}/g, `_terms${s + 1}}}`)
+                              .replace(/_price2\}\}/g, `_price${s + 1}}}`)
+                              .replace(/_shop2\}\}/g, `_shop${s + 1}}}`)
+                              .replace(/_amount2\}\}/g, `_amount${s + 1}}}`)
+                              .replace(/_warranty2\}\}/g, `_warranty${s + 1}}}`)
+                              .replace(/vat2\}\}/g, `vat${s + 1}}}`)
+                              .replace(/parts_shop2_price2\}\}/g, `parts_shop${s + 1}_price${s + 1}}}`)
+                              .replace(/total_shop2\}\}/g, `total_shop${s + 1}}}`)
+                              .replace(/total_amount2\}\}/g, `total_amount${s + 1}}}`);
+              toCell.value = newVal;
+            } else {
+              toCell.value = val;
+            }
+          }
+        }
+      }
+
+      // 2. Dynamic Row Expansion (Row 17 is our repeating parts row)
+      const repeatingRowIndex = 17;
+      const itemsCount = items.length;
+      if (itemsCount > 1) {
+        ws.duplicateRow(repeatingRowIndex, itemsCount - 1, true);
+      }
+
+      // 3. Fill Row Data for items
+      for (let i = 0; i < itemsCount; i++) {
+        const currentRowIdx = repeatingRowIndex + i;
+        const row = ws.getRow(currentRowIdx);
+        const itemData = items[i];
+
+        row.getCell(1).value = i + 1;
+        row.getCell(2).value = itemData.item || "";
+        row.getCell(3).value = itemData.quantity || 0;
+        row.getCell(4).value = itemData.unit || "";
+
+        for (let s = 0; s < N; s++) {
+          const colIdx = 5 + s;
+          const shop = shops[s];
+          row.getCell(colIdx).value = shop.prices[i] !== undefined ? shop.prices[i] : 0;
+        }
+      }
+
+      // 4. Fill Shop Headers & Attributes (Row 8 to 14)
+      for (let s = 0; s < N; s++) {
+        const colIdx = 5 + s;
+        const shop = shops[s];
+        
+        ws.getCell(8, colIdx).value = `SHOP ${s + 1}`;
+        ws.getCell(9, colIdx).value = shop.name || "";
+        ws.getCell(10, colIdx).value = shop.contact_person || "";
+        ws.getCell(11, colIdx).value = shop.contact_no || "";
+        ws.getCell(12, colIdx).value = shop.work_duration || "";
+        ws.getCell(13, colIdx).value = shop.warranty || "";
+        ws.getCell(14, colIdx).value = shop.payment_terms || "";
+      }
+
+      // 5. Fill Dynamic Summary Rows (shifted by itemsCount - 1)
+      const totalRowIdx = repeatingRowIndex + itemsCount;
+      const vatRowIdx = totalRowIdx + 1;
+      const grandRowIdx = vatRowIdx + 1;
+
+      for (let s = 0; s < N; s++) {
+        const colIdx = 5 + s;
+        const shop = shops[s];
+        ws.getCell(totalRowIdx, colIdx).value = shop.total || 0;
+        ws.getCell(vatRowIdx, colIdx).value = shop.vat || 0;
+        ws.getCell(grandRowIdx, colIdx).value = shop.total_amount || 0;
+      }
+
+      // 6. Fill General Metadata & Signatories
+      for (let r = 1; r <= ws.rowCount; r++) {
+        if (r >= repeatingRowIndex && r <= grandRowIdx) {
+          continue; // Skip parts grid row area
+        }
+        const row = ws.getRow(r);
+        row.eachCell({ includeEmpty: true }, (cell) => {
+          if (cell.isMerged && cell.master && cell.address !== cell.master.address) return;
+          const val = cell.value;
+          if (typeof val === "string") {
+            let cellStr = val;
+            const matches = cellStr.match(/\{\{([^}]+)\}\}/g);
+            if (matches) {
+              matches.forEach((m) => {
+                const key = m.replace(/[\{\}]/g, "").trim();
+                const replacedVal = data[key] !== undefined ? data[key] : "";
+                cellStr = cellStr.replace(m, String(replacedVal));
+              });
+              cell.value = (isNaN(Number(cellStr)) || cellStr === "" || cellStr.startsWith("0") && cellStr.length > 1) ? cellStr : Number(cellStr);
+            }
+          }
+        });
+      }
+
+      const outBuffer = await workbook.xlsx.writeBuffer();
+      const outBlob = new Blob([outBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      saveAs(outBlob, outputFilename);
+      return;
+    }
+
     workbook.eachSheet((worksheet) => {
       // 1. Resolve shared formulas immediately to prevent save corruption errors
       resolveSharedFormulas(worksheet);

@@ -22,6 +22,7 @@ import POList from "./components/POList";
 import POForm from "./components/POForm";
 import PaymentInstructionSlipModule from "./components/PaymentInstructionSlipModule";
 import RequestForSupplyModule from "./components/RequestForSupplyModule";
+import RfsApprovalModule from "./components/RfsApprovalModule";
 import CanvassSheetModule from "./components/CanvassSheetModule";
 import smeiLogo from "./assets/images/smei_logo_1782431389924.jpg";
 import { 
@@ -52,6 +53,7 @@ import { useTheme } from "./components/ThemeProvider";
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [greetingMessage, setGreetingMessage] = useState<string | null>(null);
   const [pos, setPOs] = useState<PurchaseOrder[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
@@ -147,6 +149,11 @@ export default function App() {
   const handleLogin = (user: User) => {
     setCurrentUser(user);
     setCurrentTab("dashboard");
+    const greetings = ["Welcome back", "Hello there", "Good to see you", "Greetings"];
+    const randomGreeting = greetings[Math.floor(Math.random() * greetings.length)];
+    const firstName = user.fullName.split(" ")[0];
+    setGreetingMessage(`${randomGreeting}!, ${firstName}`);
+    setTimeout(() => setGreetingMessage(null), 5000); // hide after 5 seconds
   };
 
   const handleLogout = async () => {
@@ -279,6 +286,7 @@ export default function App() {
           { name: "Payment Instruction Slip", key: "pis", icon: "pis" },
           { name: "Request for Supply", key: "rfs", icon: "rfs" },
           { name: "Canvass Sheet", key: "canvass", icon: "canvass" },
+          { name: "RFS Approval", key: "rfs-approval", icon: "check" },
           { name: "Supplier Registry", key: "suppliers", icon: "users" },
           { name: "Supplier Summary", key: "supplier-report", icon: "reports" },
           { name: "Supplier Analytics", key: "supplier-analytics", icon: "reports" },
@@ -293,6 +301,7 @@ export default function App() {
           { name: "Payment Instruction Slip", key: "pis", icon: "pis" },
           { name: "Request for Supply", key: "rfs", icon: "rfs" },
           { name: "Canvass Sheet", key: "canvass", icon: "canvass" },
+          { name: "RFS Approval", key: "rfs-approval", icon: "check" },
           { name: "Supplier Registry", key: "suppliers", icon: "users" },
           { name: "Supplier Summary", key: "supplier-report", icon: "reports" },
           { name: "Supplier Analytics", key: "supplier-analytics", icon: "reports" },
@@ -551,11 +560,11 @@ export default function App() {
                 <button
                   key={menuItem.key}
                   onClick={() => handleMenuClick(menuItem.key)}
-                  className={`w-full flex items-center py-2.5 transition-all duration-150 cursor-pointer group focus:outline-none ${
-                    isSidebarCollapsed ? 'justify-center px-4' : 'px-4'
+                  className={`w-[calc(100%-16px)] mx-2 flex items-center py-2.5 transition-all duration-150 cursor-pointer group focus:outline-none rounded-lg ${
+                    isSidebarCollapsed ? 'justify-center px-2' : 'px-4'
                   } ${
                     active
-                      ? "bg-red-100 text-red-700 dark:bg-red-700 dark:text-white border-l-4 border-red-700 dark:border-red-500"
+                      ? "bg-red-100 text-red-700 dark:bg-red-700 dark:text-white border-l-4 border-red-700 dark:border-red-500 font-extrabold"
                       : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white border-l-4 border-transparent"
                   }`}
                   title={isSidebarCollapsed ? menuItem.name : undefined}
@@ -837,6 +846,12 @@ export default function App() {
                 />
               )}
 
+              {currentTab === "rfs-approval" && (
+                <RfsApprovalModule
+                  currentUser={currentUser}
+                />
+              )}
+
               {currentTab === "canvass" && (
                 <CanvassSheetModule
                   currentUser={currentUser}
@@ -897,6 +912,12 @@ export default function App() {
           </div>
         </footer>
 
+        {greetingMessage && (
+        <div className="fixed top-4 right-4 z-[9999] bg-white dark:bg-gray-800 text-smei-crimson dark:text-red-400 px-6 py-4 rounded-xl shadow-2xl border-l-4 border-smei-crimson animate-slide-in-right flex items-center gap-3">
+          <span className="text-2xl">👋</span>
+          <p className="font-bold font-display">{greetingMessage}</p>
+        </div>
+      )}
         {/* 6. Profile & Security Management Modal */}
         <ProfileModal
           isOpen={isProfileModalOpen}

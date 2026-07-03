@@ -120,6 +120,8 @@ export interface PurchaseOrder {
   checkedByTitle?: string;
   verifiedBy?: string;
   verifiedByTitle?: string;
+  verifiedBy2?: string;
+  verifiedBy2Title?: string;
   approvedBy?: string;
   approvedByTitle?: string;
   conforme?: string;
@@ -127,6 +129,7 @@ export interface PurchaseOrder {
   excludePreparedBy?: boolean;
   excludeCheckedBy?: boolean;
   excludeVerifiedBy?: boolean;
+  excludeVerifiedBy2?: boolean;
   excludeApprovedBy?: boolean;
   excludeConforme?: boolean;
   
@@ -272,10 +275,37 @@ export interface CanvassSheet {
   recommendedSupplier: string;
   totalCost: number;
   
-  // Signatories
+  // New input fields for the Canvass Sheet template
+  category?: string;
+  plateNo?: string;
+  scopeOfWorks?: string;
+  shopName1?: string;
+  shopName2?: string;
+  contactPerson1?: string;
+  contactPerson2?: string;
+  contactNo1?: string;
+  contactNo2?: string;
+  remarks?: string;
+  workDuration1?: string;
+  workDuration2?: string;
+  warranty1?: string;
+  warranty2?: string;
+  paymentTerms1?: string;
+  paymentTerms2?: string;
+
+  // Signatories with positions
   requestedBy: string;
+  preparedByPosition?: string;
   checkedBy?: string;
+  checkedByPosition?: string;
+  verifiedBy?: string;
+  verifiedByPosition?: string;
   approvedBy?: string;
+  approvedByPosition?: string;
+
+  // Dynamic Lists Support
+  suppliersList?: any[];
+  partsList?: any[];
   
   created_by: string;
   created_department?: string;

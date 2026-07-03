@@ -6,23 +6,37 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { CanvassSheet, CanvassItem, User, UserRole } from "../types";
 import { api } from "../lib/api";
-import { Search, Plus, Filter, Calendar, FileText, ArrowUpDown, Trash2, Edit3, Eye, FileSpreadsheet, X, Download, Trash, Calculator } from "lucide-react";
+import { Search, Plus, Trash2, Edit3, Eye, FileText, X, Calculator, PlusCircle } from "lucide-react";
 import { exportWordWithTemplate, exportExcelWithTemplate } from "../utils/templateExport";
-import { ExportExcelButton, CreateButton, exportListToExcel } from "./SharedButtons";
+import { ExportWordButton, CreateButton } from "./SharedButtons";
 import { TableSkeleton } from "./ui/Skeleton";
 
 interface CanvassModuleProps {
   currentUser: User;
 }
 
+interface FormSupplier {
+  id: string;
+  name: string;
+  contactPerson: string;
+  contactNo: string;
+  workDuration: string;
+  warranty: string;
+  paymentTerms: string;
+  isNonVat?: boolean;
+  nonVatRate?: string;
+}
+
+interface FormPart {
+  id: string;
+  description: string;
+  prices: Record<string, number>; // Maps supplier.id -> price
+}
+
 export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) {
   const [sheets, setSheets] = useState<CanvassSheet[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  
-  // Pagination State
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 8;
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -30,27 +44,28 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
   const [isEditMode, setIsEditMode] = useState(false);
   const [activeSheetId, setActiveSheetId] = useState<string | null>(null);
 
-  // Form State
+  // Form State - Document Information
   const [canvassNumber, setCanvassNumber] = useState("");
   const [canvassDate, setCanvassDate] = useState("");
-  const [supplierName, setSupplierName] = useState("");
-  const [address, setAddress] = useState("");
-  const [contactPerson, setContactPerson] = useState("");
-  const [phoneNumber, setPhoneNumber] = useState("");
-  const [email, setEmail] = useState("");
-  const [requestedBy, setRequestedBy] = useState(currentUser.fullName);
+  const [category, setCategory] = useState("");
+  const [plateNo, setPlateNo] = useState("");
+  const [remarks, setRemarks] = useState("");
+
+  // Dynamic Lists State
+  const [suppliers, setSuppliers] = useState<FormSupplier[]>([]);
+  const [parts, setParts] = useState<FormPart[]>([]);
+
+  // Signatory State
+  const [preparedBy, setPreparedBy] = useState("");
+  const [preparedByPosition, setPreparedByPosition] = useState("Canvasser");
   const [checkedBy, setCheckedBy] = useState("");
+  const [checkedByPosition, setCheckedByPosition] = useState("Maintenance Supervisor");
+  const [verifiedBy, setVerifiedBy] = useState("");
+  const [verifiedByPosition, setVerifiedByPosition] = useState("Operations Manager");
   const [approvedBy, setApprovedBy] = useState("");
+  const [approvedByPosition, setApprovedByPosition] = useState("Purchasing Manager");
 
-  // Items State
-  const [items, setItems] = useState<CanvassItem[]>([]);
-
-  // Computed Fields
-  const [lowestPrice, setLowestPrice] = useState(0);
-  const [recommendedSupplier, setRecommendedSupplier] = useState("N/A");
-  const [totalCost, setTotalCost] = useState(0);
-
-  // Error States
+  // Errors State
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const isAdmin = currentUser.role === UserRole.Administrator;
@@ -62,6 +77,9 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
     try {
       const data = await api.getCanvass();
       setSheets(data);
+      if (data && data.length > 0 && !activeSheetId) {
+        setActiveSheetId(data[data.length - 1].id);
+      }
     } catch (err) {
       console.error("Error fetching canvass sheets:", err);
     } finally {
@@ -73,49 +91,49 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
     fetchSheets();
   }, []);
 
-  // Recalculate automatic computations live when items change
-  useEffect(() => {
-    let totalA = 0;
-    let totalB = 0;
-    let totalC = 0;
-    let calculatedTotalCost = 0;
-
-    items.forEach((item) => {
-      const qty = Number(item.quantity) || 0;
-      const priceA = Number(item.supplierAPrice) || 0;
-      const priceB = Number(item.supplierBPrice) || 0;
-      const priceC = Number(item.supplierCPrice) || 0;
-
-      totalA += priceA * qty;
-      totalB += priceB * qty;
-      totalC += priceC * qty;
-
-      let selectedPrice = 0;
-      if (item.selectedSupplier === "Supplier A") selectedPrice = priceA;
-      else if (item.selectedSupplier === "Supplier B") selectedPrice = priceB;
-      else if (item.selectedSupplier === "Supplier C") selectedPrice = priceC;
-
-      calculatedTotalCost += selectedPrice * qty;
+  // Auto-calculated computations live based on form inputs
+  const supplierCalculations = useMemo(() => {
+    return suppliers.map((s) => {
+      const sum = parts.reduce((acc, p) => acc + (Number(p.prices[s.id]) || 0), 0);
+      const isNonVat = !!s.isNonVat;
+      const rateStr = s.nonVatRate || "1%";
+      const ratePercent = parseFloat(rateStr.replace("%", "")) / 100;
+      const rate = isNaN(ratePercent) ? 0.01 : ratePercent;
+      
+      const vat = isNonVat ? sum * rate : sum * 0.12;
+      const total = sum + vat;
+      return {
+        supplierId: s.id,
+        sum,
+        vat,
+        total,
+      };
     });
+  }, [suppliers, parts]);
 
-    const prices = [];
-    if (totalA > 0) prices.push({ name: "Supplier A", total: totalA });
-    if (totalB > 0) prices.push({ name: "Supplier B", total: totalB });
-    if (totalC > 0) prices.push({ name: "Supplier C", total: totalC });
+  // Dynamically display recommended supplier (the one with the lowest total amount > 0)
+  const recommended = useMemo(() => {
+    const validSuppliers = supplierCalculations.filter((calc) => calc.sum > 0);
+    if (validSuppliers.length === 0) return { name: "N/A", total: 0 };
 
-    let calculatedLowestPrice = 0;
-    let calculatedRecommended = "N/A";
+    const sorted = [...validSuppliers].sort((a, b) => a.total - b.total);
+    const best = sorted[0];
+    const supplierObj = suppliers.find((s) => s.id === best.supplierId);
+    return {
+      name: supplierObj ? supplierObj.name : "N/A",
+      total: best.total,
+    };
+  }, [supplierCalculations, suppliers]);
 
-    if (prices.length > 0) {
-      prices.sort((a, b) => a.total - b.total);
-      calculatedLowestPrice = prices[0].total;
-      calculatedRecommended = prices[0].name;
-    }
-
-    setLowestPrice(calculatedLowestPrice);
-    setRecommendedSupplier(calculatedRecommended);
-    setTotalCost(calculatedTotalCost);
-  }, [items]);
+  // Highlights the lowest price per part in the table
+  const getLowestPriceSupplierIds = (p: FormPart) => {
+    const validPrices = suppliers
+      .map((s) => ({ id: s.id, val: Number(p.prices[s.id]) || 0 }))
+      .filter((x) => x.val > 0);
+    if (validPrices.length === 0) return [];
+    const minVal = Math.min(...validPrices.map((x) => x.val));
+    return validPrices.filter((x) => x.val === minVal).map((x) => x.id);
+  };
 
   // Filter & Search Logic
   const filteredSheets = useMemo(() => {
@@ -128,18 +146,7 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
     });
   }, [sheets, search]);
 
-  // Pagination calculation
-  const totalPages = Math.ceil(filteredSheets.length / itemsPerPage) || 1;
-  const paginatedSheets = useMemo(() => {
-    const start = (currentPage - 1) * itemsPerPage;
-    return filteredSheets.slice(start, start + itemsPerPage);
-  }, [filteredSheets, currentPage]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [search]);
-
-  // Open modal for Create/View/Edit
+  // Open Modal Dialog
   const handleOpenModal = async (sheet: CanvassSheet | null = null, edit = false) => {
     setErrors({});
     if (sheet) {
@@ -147,43 +154,116 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
       setIsEditMode(edit);
       setCanvassNumber(sheet.canvassNumber);
       setCanvassDate(sheet.canvassDate);
-      setSupplierName(sheet.supplierName);
-      setAddress(sheet.address || "");
-      setContactPerson(sheet.contactPerson || "");
-      setPhoneNumber(sheet.phoneNumber || "");
-      setEmail(sheet.email || "");
-      setRequestedBy(sheet.requestedBy);
+      setCategory(sheet.category || "");
+      setPlateNo(sheet.plateNo || "");
+      setRemarks(sheet.remarks || "");
+
+      setPreparedBy(sheet.requestedBy || "");
+      setPreparedByPosition(sheet.preparedByPosition || "Canvasser");
       setCheckedBy(sheet.checkedBy || "");
+      setCheckedByPosition(sheet.checkedByPosition || "Maintenance Supervisor");
+      setVerifiedBy(sheet.verifiedBy || "");
+      setVerifiedByPosition(sheet.verifiedByPosition || "Operations Manager");
       setApprovedBy(sheet.approvedBy || "");
-      setItems(sheet.items || []);
+      setApprovedByPosition(sheet.approvedByPosition || "Purchasing Manager");
+
+      // Load dynamic structures if present in the database, else use backward-compatible fallback
+      if (sheet.suppliersList && Array.isArray(sheet.suppliersList) && sheet.suppliersList.length > 0) {
+        setSuppliers(sheet.suppliersList);
+      } else {
+        setSuppliers([
+          {
+            id: "supplier_1",
+            name: sheet.shopName1 || sheet.supplierName || "Supplier A",
+            contactPerson: sheet.contactPerson1 || sheet.contactPerson || "",
+            contactNo: sheet.contactNo1 || sheet.phoneNumber || "",
+            workDuration: sheet.workDuration1 || "",
+            warranty: sheet.warranty1 || "",
+            paymentTerms: sheet.paymentTerms1 || "",
+          },
+          {
+            id: "supplier_2",
+            name: sheet.shopName2 || "Supplier B",
+            contactPerson: sheet.contactPerson2 || "",
+            contactNo: sheet.contactNo2 || "",
+            workDuration: sheet.workDuration2 || "",
+            warranty: sheet.warranty2 || "",
+            paymentTerms: sheet.paymentTerms2 || "",
+          },
+        ]);
+      }
+
+      if (sheet.partsList && Array.isArray(sheet.partsList) && sheet.partsList.length > 0) {
+        setParts(sheet.partsList);
+      } else {
+        const fallbackSuppliers = sheet.suppliersList || [
+          { id: "supplier_1" },
+          { id: "supplier_2" },
+        ];
+        const s1Id = fallbackSuppliers[0]?.id || "supplier_1";
+        const s2Id = fallbackSuppliers[1]?.id || "supplier_2";
+
+        setParts(
+          (sheet.items || []).map((it, idx) => ({
+            id: it.id || `part_${Date.now()}_${idx}`,
+            description: it.item,
+            prices: {
+              [s1Id]: it.supplierAPrice || 0,
+              [s2Id]: it.supplierBPrice || 0,
+            },
+          }))
+        );
+      }
     } else {
       setSelectedSheet(null);
       setIsEditMode(true);
       setCanvassDate(new Date().toISOString().split("T")[0]);
-      setSupplierName("");
-      setAddress("");
-      setContactPerson("");
-      setPhoneNumber("");
-      setEmail("");
-      setRequestedBy(currentUser.fullName);
+      setCategory("");
+      setPlateNo("");
+      setRemarks("");
+
+      // Prefill standard default signatories
+      setPreparedBy(currentUser.fullName);
+      setPreparedByPosition("Canvasser");
       setCheckedBy("");
+      setCheckedByPosition("Maintenance Supervisor");
+      setVerifiedBy("");
+      setVerifiedByPosition("Operations Manager");
       setApprovedBy("");
-      setItems([
+      setApprovedByPosition("Purchasing Manager");
+
+      setSuppliers([
         {
-          id: `item_${Date.now()}_0`,
-          item: "",
-          specification: "",
-          quantity: 1,
-          unit: "pcs",
-          supplierAPrice: 0,
-          supplierBPrice: 0,
-          supplierCPrice: 0,
-          selectedSupplier: "Supplier A",
-          remarks: ""
-        }
+          id: "supplier_1",
+          name: "Supplier A",
+          contactPerson: "",
+          contactNo: "",
+          workDuration: "",
+          warranty: "",
+          paymentTerms: "",
+        },
+        {
+          id: "supplier_2",
+          name: "Supplier B",
+          contactPerson: "",
+          contactNo: "",
+          workDuration: "",
+          warranty: "",
+          paymentTerms: "",
+        },
       ]);
 
-      // Fetch next auto-generated number
+      setParts([
+        {
+          id: "part_1",
+          description: "",
+          prices: {
+            supplier_1: 0,
+            supplier_2: 0,
+          },
+        },
+      ]);
+
       try {
         const { nextNumber } = await api.getNextCanvassNumber();
         setCanvassNumber(nextNumber);
@@ -199,114 +279,204 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
     setSelectedSheet(null);
   };
 
-  // Items manipulation helpers
-  const handleAddItem = () => {
-    setItems((prev) => [
-      ...prev,
-      {
-        id: `item_${Date.now()}_${prev.length}`,
-        item: "",
-        specification: "",
-        quantity: 1,
-        unit: "pcs",
-        supplierAPrice: 0,
-        supplierBPrice: 0,
-        supplierCPrice: 0,
-        selectedSupplier: "Supplier A",
-        remarks: ""
-      }
-    ]);
-  };
+  // Add/Remove Suppliers dynamically
+  const handleAddSupplier = () => {
+    const newId = `supplier_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    const labelLetter = String.fromCharCode(65 + suppliers.length);
+    const newSupplier: FormSupplier = {
+      id: newId,
+      name: `Supplier ${labelLetter}`,
+      contactPerson: "",
+      contactNo: "",
+      workDuration: "",
+      warranty: "",
+      paymentTerms: "",
+    };
+    setSuppliers([...suppliers, newSupplier]);
 
-  const handleRemoveItem = (index: number) => {
-    if (items.length <= 1) {
-      alert("At least one item is required.");
-      return;
-    }
-    setItems((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const handleItemChange = (index: number, field: keyof CanvassItem, value: any) => {
-    setItems((prev) =>
-      prev.map((it, i) => (i === index ? { ...it, [field]: value } : it))
+    setParts(
+      parts.map((p) => ({
+        ...p,
+        prices: {
+          ...p.prices,
+          [newId]: 0,
+        },
+      }))
     );
   };
 
-  // Form Submission
+  const handleRemoveSupplier = (id: string) => {
+    if (suppliers.length <= 1) {
+      alert("At least one supplier is required.");
+      return;
+    }
+    setSuppliers(suppliers.filter((s) => s.id !== id));
+    setParts(
+      parts.map((p) => {
+        const copy = { ...p.prices };
+        delete copy[id];
+        return {
+          ...p,
+          prices: copy,
+        };
+      })
+    );
+  };
+
+  const handleSupplierChange = (id: string, field: keyof FormSupplier, value: any) => {
+    setSuppliers(suppliers.map((s) => (s.id === id ? { ...s, [field]: value } : s)));
+  };
+
+  // Add/Remove Parts dynamically
+  const handleAddPart = () => {
+    const newId = `part_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    const initialPrices: Record<string, number> = {};
+    suppliers.forEach((s) => {
+      initialPrices[s.id] = 0;
+    });
+    setParts([...parts, { id: newId, description: "", prices: initialPrices }]);
+  };
+
+  const handleRemovePart = (id: string) => {
+    if (parts.length <= 1) {
+      alert("At least one part is required.");
+      return;
+    }
+    setParts(parts.filter((p) => p.id !== id));
+  };
+
+  const handlePartDescChange = (id: string, val: string) => {
+    setParts(parts.map((p) => (p.id === id ? { ...p, description: val } : p)));
+  };
+
+  const handlePartPriceChange = (partId: string, supplierId: string, val: number) => {
+    setParts(
+      parts.map((p) => {
+        if (p.id === partId) {
+          return {
+            ...p,
+            prices: {
+              ...p.prices,
+              [supplierId]: val,
+            },
+          };
+        }
+        return p;
+      })
+    );
+  };
+
+  // Form Submission & Database persistence
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isEditMode) return;
 
-    // Client-side Validations
+    // Strict validation rules
     const newErrors: Record<string, string> = {};
-    
-    if (!supplierName.trim()) newErrors.supplierName = "Primary Supplier Name is required.";
-    if (!canvassDate) newErrors.canvassDate = "Canvass date is required.";
-    
+
     if (!canvassNumber.trim()) {
       newErrors.canvassNumber = "Canvass Number is required.";
     } else {
-      const format = /^CANVASS-\d{2}-\d{3}$/;
+      const format = /^\d{5}$/;
       if (!format.test(canvassNumber)) {
-        newErrors.canvassNumber = "Invalid format. Expected: CANVASS-YY-### (e.g., CANVASS-26-001).";
+        newErrors.canvassNumber = "Invalid format. Expected: 5-digit sequential number (e.g., 00001).";
       }
     }
 
-    // Validate Items
-    if (items.length === 0) {
-      newErrors.items = "Canvass Sheet must contain at least one item.";
-    } else {
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        if (!item.item.trim()) {
-          newErrors.items = `Item #${i + 1} name is required.`;
-          break;
-        }
-        if (Number(item.quantity) <= 0) {
-          newErrors.items = `Item #${i + 1} quantity must be greater than zero.`;
-          break;
-        }
-        if (Number(item.supplierAPrice) < 0 || Number(item.supplierBPrice) < 0 || Number(item.supplierCPrice) < 0) {
-          newErrors.items = `Item #${i + 1} pricing columns cannot contain negative amounts.`;
-          break;
-        }
-      }
+    if (!canvassDate) {
+      newErrors.canvassDate = "Canvass Date is required.";
     }
+
+    suppliers.forEach((s, idx) => {
+      if (!s.name.trim()) {
+        newErrors[`supplier_name_${s.id}`] = `Supplier #${idx + 1} Name is required.`;
+      }
+    });
+
+    parts.forEach((p, idx) => {
+      if (!p.description.trim()) {
+        newErrors[`part_desc_${p.id}`] = `Part #${idx + 1} Description is required.`;
+      }
+    });
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
       return;
     }
 
+    const s0 = suppliers[0] || { name: "N/A", contactPerson: "", contactNo: "", workDuration: "", warranty: "", paymentTerms: "" };
+    const s1 = suppliers[1] || { name: "", contactPerson: "", contactNo: "", workDuration: "", warranty: "", paymentTerms: "" };
+
     const payload: Partial<CanvassSheet> = {
       canvassNumber,
       canvassDate,
-      supplierName,
-      address,
-      contactPerson,
-      phoneNumber,
-      email,
-      items,
-      lowestPrice,
-      recommendedSupplier,
-      totalCost,
-      requestedBy,
+      supplierName: s0.name,
+      address: s0.contactPerson ? "N/A" : "",
+      contactPerson: s0.contactPerson || "",
+      phoneNumber: s0.contactNo || "",
+      email: "",
+
+      // Save rich dynamic data models directly
+      suppliersList: suppliers,
+      partsList: parts,
+
+      // Excel legacy items array mapping
+      items: parts.map((p) => ({
+        id: p.id,
+        item: p.description,
+        specification: "",
+        quantity: 1,
+        unit: "pcs",
+        supplierAPrice: p.prices[s0.id] || 0,
+        supplierBPrice: p.prices[s1.id] || 0,
+        supplierCPrice: (suppliers[2] && p.prices[suppliers[2].id]) || 0,
+        selectedSupplier: "Supplier A",
+        remarks: "",
+      })),
+
+      lowestPrice: recommended.total,
+      recommendedSupplier: recommended.name,
+      totalCost: recommended.total,
+
+      requestedBy: preparedBy,
       checkedBy,
-      approvedBy
+      verifiedBy,
+      approvedBy,
+
+      category,
+      plateNo,
+      scopeOfWorks: parts.map((p) => p.description).join(", "),
+
+      shopName1: s0.name,
+      shopName2: s1.name,
+      contactPerson1: s0.contactPerson,
+      contactPerson2: s1.contactPerson,
+      contactNo1: s0.contactNo,
+      contactNo2: s1.contactNo,
+      remarks,
+      workDuration1: s0.workDuration,
+      workDuration2: s1.workDuration,
+      warranty1: s0.warranty,
+      warranty2: s1.warranty,
+      paymentTerms1: s0.paymentTerms,
+      paymentTerms2: s1.paymentTerms,
+
+      preparedByPosition,
+      checkedByPosition,
+      verifiedByPosition,
+      approvedByPosition,
     };
 
     try {
       if (selectedSheet) {
-        // Edit Mode
         await api.updateCanvass(selectedSheet.id, payload);
       } else {
-        // Create Mode
         await api.createCanvass(payload);
       }
       fetchSheets();
       handleCloseModal();
     } catch (err: any) {
-      setErrors({ server: err.message || "An unexpected error occurred." });
+      setErrors({ server: err.message || "An unexpected error occurred saving the sheet." });
     }
   };
 
@@ -315,74 +485,170 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
       try {
         await api.deleteCanvass(id);
         fetchSheets();
+        if (activeSheetId === id) setActiveSheetId(null);
       } catch (err: any) {
         alert(err.message || "Error deleting Canvass Sheet");
       }
     }
   };
 
-  // Template-based Export
+  // Export Compatibility Handler
   const handleExport = async (sheet: CanvassSheet, format: "word" | "excel") => {
-    const formattedLowest = new Intl.NumberFormat("en-PH", {
-      style: "currency",
-      currency: "PHP",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(sheet.lowestPrice);
+    const sList: FormSupplier[] = sheet.suppliersList || [
+      {
+        id: "supplier_1",
+        name: sheet.shopName1 || sheet.supplierName || "Supplier A",
+        contactPerson: sheet.contactPerson1 || sheet.contactPerson || "",
+        contactNo: sheet.contactNo1 || sheet.phoneNumber || "",
+        workDuration: sheet.workDuration1 || "",
+        warranty: sheet.warranty1 || "",
+        paymentTerms: sheet.paymentTerms1 || "",
+      },
+      {
+        id: "supplier_2",
+        name: sheet.shopName2 || "Supplier B",
+        contactPerson: sheet.contactPerson2 || "",
+        contactNo: sheet.contactNo2 || "",
+        workDuration: sheet.workDuration2 || "",
+        warranty: sheet.warranty2 || "",
+        paymentTerms: sheet.paymentTerms2 || "",
+      },
+    ];
 
-    const formattedTotal = new Intl.NumberFormat("en-PH", {
-      style: "currency",
-      currency: "PHP",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(sheet.totalCost);
+    const s0 = sList[0] || { id: "s0", name: "", contactPerson: "", contactNo: "", workDuration: "", warranty: "", paymentTerms: "" };
+    const s1 = sList[1] || { id: "s1", name: "", contactPerson: "", contactNo: "", workDuration: "", warranty: "", paymentTerms: "" };
 
-    const exportData = {
-      CANVASS_NO: sheet.canvassNumber,
-      CANVASS_DATE: sheet.canvassDate,
-      SUPPLIER_NAME: sheet.supplierName,
-      ADDRESS: sheet.address || "N/A",
-      CONTACT: sheet.contactPerson || "N/A",
-      PHONE: sheet.phoneNumber || "N/A",
-      EMAIL: sheet.email || "N/A",
-      LOWEST_PRICE: formattedLowest,
-      RECOMMENDED_SUPPLIER: sheet.recommendedSupplier,
-      TOTAL_COST: formattedTotal,
-      REQUESTED_BY: sheet.requestedBy,
-      CHECKED_BY: sheet.checkedBy || "N/A",
-      APPROVED_BY: sheet.approvedBy || "N/A",
-    };
-
-    const exportItems = sheet.items.map((it, idx) => ({
-      index: idx + 1,
-      item: it.item,
-      specification: it.specification || "N/A",
-      quantity: it.quantity,
-      unit: it.unit,
-      supplierAPrice: it.supplierAPrice,
-      supplierBPrice: it.supplierBPrice,
-      supplierCPrice: it.supplierCPrice,
-      selectedSupplier: it.selectedSupplier,
-      remarks: it.remarks || "N/A",
+    const pList: FormPart[] = sheet.partsList || (sheet.items || []).map((it, idx) => ({
+      id: it.id || `p_${idx}`,
+      description: it.item,
+      prices: {
+        [s0.id]: it.supplierAPrice || 0,
+        [s1.id]: it.supplierBPrice || 0,
+      },
     }));
 
+    const total_shop1 = pList.reduce((sum, p) => sum + (Number(p.prices[s0.id]) || 0), 0);
+    const total_shop2 = pList.reduce((sum, p) => sum + (Number(p.prices[s1.id]) || 0), 0);
+
+    const isNonVat1 = !!s0.isNonVat;
+    const ratePercent1 = parseFloat((s0.nonVatRate || "1%").replace("%", "")) / 100;
+    const rate1 = isNonVat1 ? (isNaN(ratePercent1) ? 0.01 : ratePercent1) : 0.12;
+    const vat1 = total_shop1 * rate1;
+
+    const isNonVat2 = !!s1.isNonVat;
+    const ratePercent2 = parseFloat((s1.nonVatRate || "1%").replace("%", "")) / 100;
+    const rate2 = isNonVat2 ? (isNaN(ratePercent2) ? 0.01 : ratePercent2) : 0.12;
+    const vat2 = total_shop2 * rate2;
+
+    const total_amount1 = total_shop1 + vat1;
+    const total_amount2 = total_shop2 + vat2;
+
+    const formatCurrency = (val: number) => {
+      return new Intl.NumberFormat("en-PH", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(val);
+    };
+
+    const exportData = {
+      Control_NO: sheet.canvassNumber,
+      Category: sheet.category || "General Procurement",
+      Plate_No: sheet.plateNo || "N/A",
+
+      shop_name1: s0.name || "",
+      shop_name2: s1.name || "",
+
+      contact_person1: s0.contactPerson || "",
+      contact_person2: s1.contactPerson || "",
+
+      contact_no1: s0.contactNo || "",
+      contact_no2: s1.contactNo || "",
+
+      remarks: sheet.remarks || "",
+
+      work_duration1: s0.workDuration || "",
+      work_duration2: s1.workDuration || "",
+
+      warranty1: s0.warranty || "",
+      warranty2: s1.warranty || "",
+
+      payment_terms1: s0.paymentTerms || "",
+      payment_terms2: s1.paymentTerms || "",
+
+      parts1: pList.map((p) => p.description).join("\n"),
+      parts_shop1_price1: pList.map((p) => (p.prices[s0.id] ? formatCurrency(p.prices[s0.id]) : "-")).join("\n"),
+      parts_shop2_price2: pList.map((p) => (p.prices[s1.id] ? formatCurrency(p.prices[s1.id]) : "-")).join("\n"),
+
+      total_shop1: formatCurrency(total_shop1),
+      total_shop2: formatCurrency(total_shop2),
+
+      vat1: formatCurrency(vat1),
+      vat2: formatCurrency(vat2),
+
+      total_amount1: formatCurrency(total_amount1),
+      total_amount2: formatCurrency(total_amount2),
+
+      PREPARED_BY: sheet.requestedBy || "",
+      PREPARED_BY_POSITION: sheet.preparedByPosition || "Canvasser",
+      CHECKED_BY: sheet.checkedBy || "",
+      CHECKED_BY_POSITION: sheet.checkedByPosition || "Maintenance Supervisor",
+      VERIFIED_BY: sheet.verifiedBy || "",
+      VERIFIED_BY_POSITION: sheet.verifiedByPosition || "Operations Manager",
+      APPROVED_BY: sheet.approvedBy || "",
+      APPROVED_BY_POSITION: sheet.approvedByPosition || "Purchasing Manager",
+    };
+
     if (format === "word") {
-      await exportWordWithTemplate("CANVASS_TEMPLATE.docx", { ...exportData, items: exportItems }, `${sheet.canvassNumber}_SMEI_CANVASS.docx`);
+      await exportWordWithTemplate("CANVASS_TEMPLATE.docx", exportData, `${sheet.canvassNumber}_SMEI_CANVASS.docx`);
     } else {
-      await exportExcelWithTemplate("CANVASS_TEMPLATE.xlsx", exportData, "items", exportItems, `${sheet.canvassNumber}_SMEI_CANVASS.xlsx`);
+      // Build shops data array for Excel advanced cloner
+      const excelShops = sList.map((s) => {
+        const t = pList.reduce((sum, p) => sum + (Number(p.prices[s.id]) || 0), 0);
+        const isNonVat = !!s.isNonVat;
+        const ratePercent = parseFloat((s.nonVatRate || "1%").replace("%", "")) / 100;
+        const rate = isNonVat ? (isNaN(ratePercent) ? 0.01 : ratePercent) : 0.12;
+        const v = t * rate;
+        return {
+          name: s.name || "N/A",
+          contact_person: s.contactPerson || "N/A",
+          contact_no: s.contactNo || "N/A",
+          work_duration: s.workDuration || "N/A",
+          warranty: s.warranty || "N/A",
+          payment_terms: s.paymentTerms || "N/A",
+          prices: pList.map((p) => p.prices[s.id] || 0),
+          total: t,
+          vat: v,
+          total_amount: t + v,
+        };
+      });
+
+      const excelItems = pList.map((p, idx) => ({
+        index: idx + 1,
+        item: p.description,
+        quantity: 1,
+        unit: "pcs",
+        supplierAPrice: p.prices[s0.id] || 0,
+        supplierBPrice: p.prices[s1.id] || 0,
+        supplierCPrice: (sList[2] && p.prices[sList[2].id]) || 0,
+      }));
+
+      await exportExcelWithTemplate(
+        "CANVASS_TEMPLATE.xlsx",
+        { ...exportData, shops: excelShops },
+        "items",
+        excelItems,
+        `${sheet.canvassNumber}_SMEI_CANVASS.xlsx`
+      );
     }
   };
 
-  const handleExportExcel = () => {
-    const dataToExport = filteredSheets.map(sheet => ({
-      "CS Number": sheet.canvassNumber,
-      "Date": sheet.date,
-      "Supplier": sheet.supplierName,
-      "Prepared By": sheet.preparedBy,
-      "Status": sheet.status,
-      "Items Count": sheet.items.length
-    }));
-    exportListToExcel(dataToExport, "Canvass_Sheets");
+  const handleExportWord = () => {
+    const active = sheets.find((s) => s.id === activeSheetId);
+    if (!active) {
+      alert("Please select a Canvass Sheet from the list first.");
+      return;
+    }
+    handleExport(active, "word");
   };
 
   return (
@@ -402,10 +668,8 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
           </div>
 
           <div className="flex items-center gap-2.5 w-full md:w-auto justify-end">
-            <ExportExcelButton onClick={handleExportExcel} />
-            {isAuthorized && (
-              <CreateButton onClick={() => handleOpenModal(null)} label="Create Canvass Sheet" />
-            )}
+            <ExportWordButton onClick={handleExportWord} />
+            {isAuthorized && <CreateButton onClick={() => handleOpenModal(null)} label="Create Canvass Sheet" />}
           </div>
         </div>
       </div>
@@ -419,32 +683,31 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
               <th className="py-4 px-6">Canvass Date</th>
               <th className="py-4 px-6">Primary Supplier</th>
               <th className="py-4 px-6">Recommended Supplier</th>
-              <th className="py-4 px-6 text-right font-mono">Lowest Price</th>
-              <th className="py-4 px-6 text-right font-mono">Total Cost</th>
+              <th className="py-4 px-6 text-right font-mono">Lowest Price (with VAT)</th>
               <th className="py-4 px-6 text-center">Actions</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <TableSkeleton rows={5} columns={7} />
-            ) : paginatedSheets.length === 0 ? (
+              <TableSkeleton rows={5} columns={6} />
+            ) : filteredSheets.length === 0 ? (
               <tr>
-                <td colSpan={7} className="py-12 text-center text-gray-400">
+                <td colSpan={6} className="py-12 text-center text-gray-400">
                   No Canvass Sheets found.
                 </td>
               </tr>
             ) : (
-              paginatedSheets.map((sheet, idx) => (
+              filteredSheets.map((sheet, idx) => (
                 <tr
                   key={sheet.id}
                   onClick={() => setActiveSheetId(sheet.id)}
                   onDoubleClick={() => handleOpenModal(sheet, false)}
                   className={`cursor-pointer transition-all border-b border-gray-50/60 group ${
                     activeSheetId === sheet.id
-                      ? "bg-red-600/20 border-l-4 border-l-smei-crimson font-medium"
+                      ? "bg-red-50/70 border-l-4 border-l-smei-crimson font-medium"
                       : idx % 2 === 1
-                      ? "bg-gray-50/30 hover:bg-red-600/10"
-                      : "bg-white hover:bg-red-600/10"
+                      ? "bg-gray-50/30 hover:bg-red-50/30"
+                      : "bg-white hover:bg-red-50/30"
                   }`}
                   title="Double-click to View details"
                 >
@@ -470,14 +733,6 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2,
                     }).format(sheet.lowestPrice)}
-                  </td>
-                  <td className="py-3 px-6 text-right font-mono font-bold text-gray-800">
-                    {new Intl.NumberFormat("en-PH", {
-                      style: "currency",
-                      currency: "PHP",
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    }).format(sheet.totalCost)}
                   </td>
                   <td className="py-3 px-6 text-center" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-center gap-1.5">
@@ -507,14 +762,6 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
                         <FileText className="w-4 h-4" />
                       </button>
 
-                      <button
-                        onClick={() => handleExport(sheet, "excel")}
-                        className="p-1 hover:bg-emerald-50 hover:text-emerald-600 text-gray-400 rounded transition-all"
-                        title="Export to Excel"
-                      >
-                        <FileSpreadsheet className="w-4 h-4" />
-                      </button>
-
                       {isAuthorized && (
                         <button
                           onClick={() => handleDelete(sheet.id, sheet.canvassNumber)}
@@ -533,44 +780,7 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
         </table>
       </div>
 
-      {/* Pagination Controls */}
-      <div className="p-4 border-t border-gray-100 bg-gray-50/50 flex items-center justify-between">
-        <span className="text-xs text-gray-500 font-semibold">
-          Showing {filteredSheets.length === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1} to{" "}
-          {Math.min(currentPage * itemsPerPage, filteredSheets.length)} of {filteredSheets.length} Sheets
-        </span>
-        <div className="flex items-center gap-1">
-          <button
-            disabled={currentPage === 1}
-            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-            className="px-2.5 py-1 text-xs font-bold text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 disabled:opacity-50"
-          >
-            Prev
-          </button>
-          {[...Array(totalPages)].map((_, i) => (
-            <button
-              key={i}
-              onClick={() => setCurrentPage(i + 1)}
-              className={`px-2.5 py-1 text-xs font-bold rounded-md ${
-                currentPage === i + 1
-                  ? "bg-smei-crimson text-white"
-                  : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"
-              }`}
-            >
-              {i + 1}
-            </button>
-          ))}
-          <button
-            disabled={currentPage === totalPages}
-            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-            className="px-2.5 py-1 text-xs font-bold text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 disabled:opacity-50"
-          >
-            Next
-          </button>
-        </div>
-      </div>
-
-      {/* Canvass Sheet View/Create/Edit Modal Dialog */}
+      {/* Rebuilt, High-Fidelity Modal Dialog */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 flex items-center justify-center p-4 backdrop-blur-xs">
           <div className="bg-white rounded-xl shadow-xl border border-gray-100 w-full max-w-6xl overflow-hidden transition-all scale-100">
@@ -579,361 +789,574 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
                 <h3 className="text-base font-bold uppercase tracking-wide">
                   {selectedSheet ? (isEditMode ? "Edit Canvass Sheet" : "Canvass Sheet Details") : "Create New Canvass Sheet"}
                 </h3>
-                <p className="text-[10px] text-red-100 font-medium">SMEI Comparative Price Canvassing</p>
+                <p className="text-[10px] text-red-100 font-medium">SMEI Comparative Price Canvassing (SMEI Canvass Sheet Layout)</p>
               </div>
               <button onClick={handleCloseModal} className="text-white hover:text-red-200">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+            <form onSubmit={handleSubmit} className="p-6 space-y-6 max-h-[80vh] overflow-y-auto">
               {errors.server && (
                 <div className="bg-rose-50 border-l-4 border-rose-500 text-rose-700 text-xs p-3 rounded-md font-medium">
                   {errors.server}
                 </div>
               )}
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* Canvass Number */}
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">Canvass Number *</label>
-                  <input
-                    type="text"
-                    required
-                    disabled={!isEditMode}
-                    className={`w-full text-sm font-mono font-semibold p-2 border rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none ${
-                      errors.canvassNumber ? "border-rose-500 bg-rose-50/20" : "border-gray-200 bg-gray-50"
-                    }`}
-                    value={canvassNumber}
-                    onChange={(e) => setCanvassNumber(e.target.value)}
-                    placeholder="CANVASS-YY-###"
-                  />
-                  {errors.canvassNumber && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.canvassNumber}</p>}
-                </div>
-
-                {/* Canvass Date */}
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">Canvass Date *</label>
-                  <input
-                    type="date"
-                    required
-                    disabled={!isEditMode}
-                    className={`w-full text-sm p-2 border rounded-lg focus:ring-1 focus:ring-smei-crimson outline-none ${
-                      errors.canvassDate ? "border-rose-500 bg-rose-50/20" : "border-gray-200"
-                    }`}
-                    value={canvassDate}
-                    onChange={(e) => setCanvassDate(e.target.value)}
-                  />
-                  {errors.canvassDate && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.canvassDate}</p>}
-                </div>
-
-                {/* Primary Supplier Name */}
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">Primary Supplier / Project *</label>
-                  <input
-                    type="text"
-                    required
-                    disabled={!isEditMode}
-                    placeholder="Enter main supplier/bidder"
-                    className={`w-full text-sm p-2 border rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson ${
-                      errors.supplierName ? "border-rose-500 bg-rose-50/20" : "border-gray-200"
-                    }`}
-                    value={supplierName}
-                    onChange={(e) => setSupplierName(e.target.value)}
-                  />
-                  {errors.supplierName && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.supplierName}</p>}
-                </div>
-
-                {/* Supplier Contact Info */}
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">Contact Person</label>
-                  <input
-                    type="text"
-                    disabled={!isEditMode}
-                    placeholder="Name of contact"
-                    className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson"
-                    value={contactPerson}
-                    onChange={(e) => setContactPerson(e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">Phone Number</label>
-                  <input
-                    type="text"
-                    disabled={!isEditMode}
-                    placeholder="e.g. +63999999"
-                    className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson font-mono"
-                    value={phoneNumber}
-                    onChange={(e) => setPhoneNumber(e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">Email Address</label>
-                  <input
-                    type="email"
-                    disabled={!isEditMode}
-                    placeholder="supplier@email.com"
-                    className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
-                </div>
-
-                {/* Supplier Address */}
-                <div className="md:col-span-3">
-                  <label className="block text-xs font-bold text-gray-700 mb-1">Supplier Business Address</label>
-                  <input
-                    type="text"
-                    disabled={!isEditMode}
-                    placeholder="Enter full physical address"
-                    className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson"
-                    value={address}
-                    onChange={(e) => setAddress(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              {/* Automatic Computations Real-Time Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-gray-50 border border-gray-100 rounded-xl p-4 mt-2">
-                <div className="flex items-center gap-3">
-                  <div className="p-3 bg-red-100 text-smei-crimson rounded-xl">
-                    <Calculator className="w-5 h-5" />
-                  </div>
+              {/* SECTION 1: GENERAL INFORMATION */}
+              <div className="space-y-4">
+                <h4 className="text-xs font-bold text-smei-crimson uppercase tracking-wide border-b border-gray-100 pb-1.5">
+                  1. General Information
+                </h4>
+                
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  {/* Document No. */}
                   <div>
-                    <span className="block text-[10px] text-gray-500 uppercase font-bold">Lowest Aggregate Price</span>
-                    <span className="block font-mono font-extrabold text-gray-900 text-lg">
-                      {new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(lowestPrice)}
-                    </span>
+                    <label className="block text-xs font-bold text-gray-700 mb-1">Document No. *</label>
+                    <input
+                      type="text"
+                      disabled={!isEditMode}
+                      className="w-full text-sm font-semibold p-2 border border-gray-200 rounded-lg bg-gray-50/50 focus:ring-1 focus:ring-smei-crimson outline-none"
+                      value="FM-PPD-04"
+                      readOnly
+                    />
                   </div>
-                </div>
 
-                <div className="flex items-center gap-3 border-l md:border-l border-gray-200 pl-4">
-                  <div className="p-3 bg-emerald-100 text-emerald-700 rounded-xl">
-                    <Calculator className="w-5 h-5" />
-                  </div>
+                  {/* Control No. */}
                   <div>
-                    <span className="block text-[10px] text-gray-500 uppercase font-bold">Recommended Supplier</span>
-                    <span className="block font-extrabold text-emerald-700 text-base uppercase tracking-wider">
-                      {recommendedSupplier}
-                    </span>
+                    <label className="block text-xs font-bold text-gray-700 mb-1">Control No. *</label>
+                    <input
+                      type="text"
+                      required
+                      disabled={!isEditMode}
+                      className={`w-full text-sm font-mono font-semibold p-2 border rounded-lg focus:ring-1 focus:ring-smei-crimson outline-none ${
+                        errors.canvassNumber ? "border-rose-500 bg-rose-50/20 animate-pulse" : "border-gray-200 bg-gray-50/30"
+                      }`}
+                      value={canvassNumber}
+                      onChange={(e) => setCanvassNumber(e.target.value)}
+                      placeholder="00001"
+                    />
+                    {errors.canvassNumber && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.canvassNumber}</p>}
                   </div>
-                </div>
 
-                <div className="flex items-center gap-3 border-l md:border-l border-gray-200 pl-4">
-                  <div className="p-3 bg-blue-100 text-blue-700 rounded-xl">
-                    <Calculator className="w-5 h-5" />
-                  </div>
+                  {/* Category */}
                   <div>
-                    <span className="block text-[10px] text-gray-500 uppercase font-bold">Selected Procurement Total</span>
-                    <span className="block font-mono font-extrabold text-blue-800 text-lg">
-                      {new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(totalCost)}
-                    </span>
+                    <label className="block text-xs font-bold text-gray-700 mb-1">Category (Plate/Category) *</label>
+                    <input
+                      type="text"
+                      required
+                      disabled={!isEditMode}
+                      className="w-full text-sm p-2 border border-gray-200 rounded-lg focus:ring-1 focus:ring-smei-crimson outline-none"
+                      value={category}
+                      onChange={(e) => setCategory(e.target.value)}
+                      placeholder="e.g. Spare Parts"
+                    />
+                  </div>
+
+                  {/* Plate No. */}
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 mb-1">Plate No. *</label>
+                    <input
+                      type="text"
+                      required
+                      disabled={!isEditMode}
+                      className="w-full text-sm p-2 border border-gray-200 rounded-lg focus:ring-1 focus:ring-smei-crimson outline-none"
+                      value={plateNo}
+                      onChange={(e) => setPlateNo(e.target.value)}
+                      placeholder="e.g. ABC-1234"
+                    />
                   </div>
                 </div>
               </div>
 
-              {/* Items Grid Comparison Table */}
-              <div className="border-t border-gray-100 pt-4 mt-2">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-xs font-bold text-smei-darkred uppercase tracking-wide">Comparative Supply Items Comparison Grid</h4>
+              {/* SECTION 2: COMPARATIVE SUPPLIERS PROFILE */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between border-b border-gray-100 pb-1.5">
+                  <h4 className="text-xs font-bold text-smei-crimson uppercase tracking-wide">
+                    2. Comparative Suppliers Information
+                  </h4>
                   {isEditMode && (
                     <button
                       type="button"
-                      onClick={handleAddItem}
-                      className="text-xs bg-red-50 hover:bg-red-100 text-smei-crimson border border-red-200 px-2.5 py-1 rounded font-semibold flex items-center gap-1"
+                      onClick={handleAddSupplier}
+                      className="text-xs bg-red-50 hover:bg-red-100 text-smei-crimson border border-red-200 px-2.5 py-1 rounded-md font-bold flex items-center gap-1 transition-all"
                     >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Add Item</span>
+                      <PlusCircle className="w-3.5 h-3.5" />
+                      <span>Add Supplier Option</span>
                     </button>
                   )}
                 </div>
 
-                {errors.items && <p className="text-xs text-rose-500 mb-2 font-semibold bg-rose-50 p-2 border-l-4 border-rose-500 rounded">{errors.items}</p>}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {suppliers.map((s, idx) => (
+                    <div
+                      key={s.id}
+                      className="relative border border-gray-200/80 rounded-xl p-4 bg-gray-50/20 space-y-3 shadow-xs hover:shadow-md transition-shadow"
+                    >
+                      {isEditMode && suppliers.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveSupplier(s.id)}
+                          className="absolute right-3 top-3 p-1 hover:bg-red-50 hover:text-red-600 text-gray-400 rounded transition-all"
+                          title="Remove Supplier Option"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
 
-                <div className="overflow-x-auto border border-gray-100 rounded-lg">
+                      <span className="inline-block bg-red-50 text-smei-crimson border border-red-200 text-[10px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                        Supplier Option {idx + 1}
+                      </span>
+
+                      <div className="space-y-2">
+                        {/* Supplier Name */}
+                        <div>
+                          <label className="block text-[10px] font-bold text-gray-500 mb-0.5">Supplier Name *</label>
+                          <input
+                            type="text"
+                            required
+                            disabled={!isEditMode}
+                            className={`w-full text-xs p-2 border rounded-md outline-none focus:ring-1 focus:ring-smei-crimson ${
+                              errors[`supplier_name_${s.id}`] ? "border-rose-400 bg-rose-50/20" : "border-gray-200 bg-white"
+                            }`}
+                            value={s.name}
+                            onChange={(e) => handleSupplierChange(s.id, "name", e.target.value)}
+                            placeholder="Supplier Company Name"
+                          />
+                          {errors[`supplier_name_${s.id}`] && (
+                            <p className="text-[9px] text-rose-500 mt-0.5 font-bold">{errors[`supplier_name_${s.id}`]}</p>
+                          )}
+                        </div>
+
+                        {/* Contact Person */}
+                        <div>
+                          <label className="block text-[10px] font-bold text-gray-500 mb-0.5">Contact Person</label>
+                          <input
+                            type="text"
+                            disabled={!isEditMode}
+                            className="w-full text-xs p-2 border border-gray-200 rounded-md bg-white focus:ring-1 focus:ring-smei-crimson outline-none"
+                            value={s.contactPerson}
+                            onChange={(e) => handleSupplierChange(s.id, "contactPerson", e.target.value)}
+                            placeholder="Full name of contact"
+                          />
+                        </div>
+
+                        {/* Contact No. */}
+                        <div>
+                          <label className="block text-[10px] font-bold text-gray-500 mb-0.5">Contact No.</label>
+                          <input
+                            type="text"
+                            disabled={!isEditMode}
+                            className="w-full text-xs p-2 border border-gray-200 rounded-md bg-white focus:ring-1 focus:ring-smei-crimson outline-none font-mono"
+                            value={s.contactNo}
+                            onChange={(e) => handleSupplierChange(s.id, "contactNo", e.target.value)}
+                            placeholder="Phone or Mobile number"
+                          />
+                        </div>
+
+                        {/* Work Duration */}
+                        <div>
+                          <label className="block text-[10px] font-bold text-gray-500 mb-0.5">Work Duration</label>
+                          <input
+                            type="text"
+                            disabled={!isEditMode}
+                            className="w-full text-xs p-2 border border-gray-200 rounded-md bg-white focus:ring-1 focus:ring-smei-crimson outline-none"
+                            value={s.workDuration}
+                            onChange={(e) => handleSupplierChange(s.id, "workDuration", e.target.value)}
+                            placeholder="e.g. 3-5 Working Days"
+                          />
+                        </div>
+
+                        {/* Warranty */}
+                        <div>
+                          <label className="block text-[10px] font-bold text-gray-500 mb-0.5">Warranty</label>
+                          <input
+                            type="text"
+                            disabled={!isEditMode}
+                            className="w-full text-xs p-2 border border-gray-200 rounded-md bg-white focus:ring-1 focus:ring-smei-crimson outline-none"
+                            value={s.warranty}
+                            onChange={(e) => handleSupplierChange(s.id, "warranty", e.target.value)}
+                            placeholder="e.g. 1 Year against defects"
+                          />
+                        </div>
+
+                        {/* Payment Terms */}
+                        <div>
+                          <label className="block text-[10px] font-bold text-gray-500 mb-0.5">Payment Terms</label>
+                          <input
+                            type="text"
+                            disabled={!isEditMode}
+                            className="w-full text-xs p-2 border border-gray-200 rounded-md bg-white focus:ring-1 focus:ring-smei-crimson outline-none"
+                            value={s.paymentTerms}
+                            onChange={(e) => handleSupplierChange(s.id, "paymentTerms", e.target.value)}
+                            placeholder="e.g. Net 30 Days"
+                          />
+                        </div>
+
+                        {/* Non-VAT options */}
+                        <div className="pt-2 border-t border-gray-100 flex items-center justify-between gap-2">
+                          <label className="flex items-center gap-1.5 cursor-pointer text-[10px] font-bold text-gray-600">
+                            <input
+                              type="checkbox"
+                              disabled={!isEditMode}
+                              checked={!!s.isNonVat}
+                              onChange={(e) => {
+                                handleSupplierChange(s.id, "isNonVat", e.target.checked);
+                                if (e.target.checked && !s.nonVatRate) {
+                                  handleSupplierChange(s.id, "nonVatRate", "1%");
+                                }
+                              }}
+                              className="rounded border-gray-300 text-smei-crimson focus:ring-smei-crimson"
+                            />
+                            <span>Non-VAT Supplier</span>
+                          </label>
+                          {!!s.isNonVat && (
+                            <div className="flex items-center gap-1 w-20">
+                              <input
+                                type="text"
+                                disabled={!isEditMode}
+                                className="w-full text-center text-[10px] p-1 border border-gray-200 rounded bg-white focus:ring-1 focus:ring-smei-crimson outline-none font-bold"
+                                value={s.nonVatRate || "1%"}
+                                onChange={(e) => handleSupplierChange(s.id, "nonVatRate", e.target.value)}
+                                placeholder="1%"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* SECTION 3: DYNAMIC PARTS COMPARISON TABLE */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between border-b border-gray-100 pb-1.5">
+                  <h4 className="text-xs font-bold text-smei-crimson uppercase tracking-wide">
+                    3. Parts Procurement Comparison Grid
+                  </h4>
+                  {isEditMode && (
+                    <button
+                      type="button"
+                      onClick={handleAddPart}
+                      className="text-xs bg-red-50 hover:bg-red-100 text-smei-crimson border border-red-200 px-2.5 py-1 rounded-md font-bold flex items-center gap-1 transition-all"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Add Part Row</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="overflow-x-auto border border-gray-100 rounded-xl shadow-xs bg-white">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="bg-gray-100 text-gray-600 font-bold uppercase border-b border-gray-200 text-[10px]">
-                        <th className="py-2 px-3 w-40">Item Description *</th>
-                        <th className="py-2 px-3 w-32">Specification</th>
-                        <th className="py-2 px-3 w-16 text-center">Qty</th>
-                        <th className="py-2 px-3 w-16">Unit</th>
-                        <th className="py-2 px-3 w-28 text-right bg-red-50/20">Supplier A Price</th>
-                        <th className="py-2 px-3 w-28 text-right bg-amber-50/20">Supplier B Price</th>
-                        <th className="py-2 px-3 w-28 text-right bg-blue-50/20">Supplier C Price</th>
-                        <th className="py-2 px-3 w-36 text-center">Selected Choice</th>
-                        <th className="py-2 px-3 w-32">Remarks</th>
-                        {isEditMode && <th className="py-2 px-3 text-center w-12">Act</th>}
+                        <th className="py-3 px-4 w-12 text-center">No.</th>
+                        <th className="py-3 px-4 min-w-[240px]">Part Description *</th>
+                        {suppliers.map((s, idx) => (
+                          <th key={s.id} className="py-3 px-4 text-right w-44 font-semibold">
+                            {s.name || `Supplier Option ${idx + 1}`} (Price)
+                          </th>
+                        ))}
+                        {isEditMode && <th className="py-3 px-4 text-center w-12">Act</th>}
                       </tr>
                     </thead>
                     <tbody>
-                      {items.map((it, idx) => (
-                        <tr key={it.id || idx} className="border-b border-gray-100 hover:bg-gray-50/50">
-                          {/* Item Description */}
-                          <td className="p-1">
-                            <input
-                              type="text"
-                              required
-                              disabled={!isEditMode}
-                              placeholder="e.g. Copper pipes"
-                              className="w-full border border-gray-200 p-1 rounded font-semibold text-gray-800 focus:border-smei-crimson outline-none"
-                              value={it.item}
-                              onChange={(e) => handleItemChange(idx, "item", e.target.value)}
-                            />
-                          </td>
-                          {/* Specification */}
-                          <td className="p-1">
-                            <input
-                              type="text"
-                              disabled={!isEditMode}
-                              placeholder="e.g. 1/2 inch thick"
-                              className="w-full border border-gray-200 p-1 rounded focus:border-smei-crimson outline-none"
-                              value={it.specification}
-                              onChange={(e) => handleItemChange(idx, "specification", e.target.value)}
-                            />
-                          </td>
-                          {/* Qty */}
-                          <td className="p-1">
-                            <input
-                              type="number"
-                              required
-                              disabled={!isEditMode}
-                              className="w-full border border-gray-200 p-1 rounded font-mono text-center focus:border-smei-crimson outline-none"
-                              value={it.quantity}
-                              onChange={(e) => handleItemChange(idx, "quantity", Number(e.target.value))}
-                            />
-                          </td>
-                          {/* Unit */}
-                          <td className="p-1">
-                            <input
-                              type="text"
-                              disabled={!isEditMode}
-                              placeholder="pcs"
-                              className="w-full border border-gray-200 p-1 rounded text-center focus:border-smei-crimson outline-none"
-                              value={it.unit}
-                              onChange={(e) => handleItemChange(idx, "unit", e.target.value)}
-                            />
-                          </td>
-                          {/* Supplier A Price */}
-                          <td className="p-1 bg-red-50/10">
-                            <input
-                              type="number"
-                              step="any"
-                              disabled={!isEditMode}
-                              className="w-full border border-red-200 p-1 rounded font-mono text-right focus:border-smei-crimson outline-none text-red-800"
-                              value={it.supplierAPrice}
-                              onChange={(e) => handleItemChange(idx, "supplierAPrice", Number(e.target.value))}
-                            />
-                          </td>
-                          {/* Supplier B Price */}
-                          <td className="p-1 bg-amber-50/10">
-                            <input
-                              type="number"
-                              step="any"
-                              disabled={!isEditMode}
-                              className="w-full border border-amber-200 p-1 rounded font-mono text-right focus:border-smei-crimson outline-none text-amber-800"
-                              value={it.supplierBPrice}
-                              onChange={(e) => handleItemChange(idx, "supplierBPrice", Number(e.target.value))}
-                            />
-                          </td>
-                          {/* Supplier C Price */}
-                          <td className="p-1 bg-blue-50/10">
-                            <input
-                              type="number"
-                              step="any"
-                              disabled={!isEditMode}
-                              className="w-full border border-blue-200 p-1 rounded font-mono text-right focus:border-smei-crimson outline-none text-blue-800"
-                              value={it.supplierCPrice}
-                              onChange={(e) => handleItemChange(idx, "supplierCPrice", Number(e.target.value))}
-                            />
-                          </td>
-                          {/* Selected Choice */}
-                          <td className="p-1 text-center">
-                            <select
-                              disabled={!isEditMode}
-                              className="w-full border border-gray-200 p-1 rounded outline-none bg-white font-semibold text-gray-700"
-                              value={it.selectedSupplier}
-                              onChange={(e: any) => handleItemChange(idx, "selectedSupplier", e.target.value)}
-                            >
-                              <option value="Supplier A">Supplier A</option>
-                              <option value="Supplier B">Supplier B</option>
-                              <option value="Supplier C">Supplier C</option>
-                            </select>
-                          </td>
-                          {/* Remarks */}
-                          <td className="p-1">
-                            <input
-                              type="text"
-                              disabled={!isEditMode}
-                              placeholder="Notes"
-                              className="w-full border border-gray-200 p-1 rounded focus:border-smei-crimson outline-none"
-                              value={it.remarks}
-                              onChange={(e) => handleItemChange(idx, "remarks", e.target.value)}
-                            />
-                          </td>
-                          {/* Act */}
-                          {isEditMode && (
-                            <td className="p-1 text-center">
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveItem(idx)}
-                                className="p-1 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded"
-                              >
-                                <Trash className="w-3.5 h-3.5" />
-                              </button>
+                      {parts.map((p, pIdx) => {
+                        const lowestSupplierIds = getLowestPriceSupplierIds(p);
+                        return (
+                          <tr key={p.id} className="border-b border-gray-100 hover:bg-gray-50/50">
+                            <td className="py-2.5 px-4 text-center text-gray-500 font-mono">{pIdx + 1}</td>
+                            
+                            {/* Part Description */}
+                            <td className="py-2.5 px-4">
+                              <input
+                                type="text"
+                                required
+                                disabled={!isEditMode}
+                                className={`w-full text-xs p-1.5 border rounded-md focus:border-smei-crimson outline-none ${
+                                  errors[`part_desc_${p.id}`] ? "border-rose-400 bg-rose-50/20" : "border-gray-200"
+                                }`}
+                                value={p.description}
+                                onChange={(e) => handlePartDescChange(p.id, e.target.value)}
+                                placeholder="Part Name or Description"
+                              />
+                              {errors[`part_desc_${p.id}`] && (
+                                <p className="text-[9px] text-rose-500 mt-0.5 font-bold">{errors[`part_desc_${p.id}`]}</p>
+                              )}
                             </td>
-                          )}
-                        </tr>
-                      ))}
+
+                            {/* Supplier Prices */}
+                            {suppliers.map((s) => {
+                              const isLowest = lowestSupplierIds.includes(s.id);
+                              return (
+                                <td
+                                  key={s.id}
+                                  className={`py-2.5 px-4 text-right transition-colors ${
+                                    isLowest ? "bg-emerald-50/80 text-emerald-800" : ""
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-end gap-1 font-mono">
+                                    <span className="text-gray-400 text-[10px]">₱</span>
+                                    <input
+                                      type="number"
+                                      step="any"
+                                      disabled={!isEditMode}
+                                      className={`w-32 text-xs p-1.5 border rounded-md text-right focus:ring-1 focus:ring-smei-crimson outline-none ${
+                                        isLowest
+                                          ? "border-emerald-300 text-emerald-800 bg-emerald-50/30 font-bold"
+                                          : "border-gray-200"
+                                      }`}
+                                      value={p.prices[s.id] === 0 ? "" : p.prices[s.id]}
+                                      onChange={(e) => handlePartPriceChange(p.id, s.id, e.target.value === "" ? 0 : Number(e.target.value))}
+                                    />
+                                  </div>
+                                </td>
+                              );
+                            })}
+
+                            {/* Delete Part Action */}
+                            {isEditMode && (
+                              <td className="py-2.5 px-4 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemovePart(p.id)}
+                                  className="p-1 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded"
+                                  title="Delete Part Row"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </td>
+                            )}
+                          </tr>
+                        );
+                      })}
+
+                      {/* SUMMARY ROW: SUM OF PARTS */}
+                      <tr className="bg-gray-50/50 border-t border-gray-200 text-[11px] font-bold text-gray-700">
+                        <td colSpan={2} className="py-3 px-4 text-right uppercase tracking-wider">
+                          Sum of Parts (Sub-Total):
+                        </td>
+                        {suppliers.map((s) => {
+                          const calc = supplierCalculations.find((c) => c.supplierId === s.id);
+                          return (
+                            <td key={s.id} className="py-3 px-4 text-right font-mono text-gray-900">
+                              {new Intl.NumberFormat("en-PH", {
+                                style: "currency",
+                                currency: "PHP",
+                                minimumFractionDigits: 2,
+                              }).format(calc ? calc.sum : 0)}
+                            </td>
+                          );
+                        })}
+                        {isEditMode && <td />}
+                      </tr>
+
+                      {/* SUMMARY ROW: VAT / Non-VAT */}
+                      <tr className="bg-gray-50/50 text-[11px] font-bold text-gray-700">
+                        <td colSpan={2} className="py-3 px-4 text-right uppercase tracking-wider">
+                          Tax (VAT 12% / Non-VAT):
+                        </td>
+                        {suppliers.map((s) => {
+                          const calc = supplierCalculations.find((c) => c.supplierId === s.id);
+                          return (
+                            <td key={s.id} className="py-3 px-4 text-right font-mono text-gray-900">
+                              <span className="text-[9px] text-gray-400 mr-1 font-sans">
+                                ({s.isNonVat ? `Non-VAT ${s.nonVatRate || "1%"}` : "VAT 12%"})
+                              </span>
+                              {new Intl.NumberFormat("en-PH", {
+                                style: "currency",
+                                currency: "PHP",
+                                minimumFractionDigits: 2,
+                              }).format(calc ? calc.vat : 0)}
+                            </td>
+                          );
+                        })}
+                        {isEditMode && <td />}
+                      </tr>
+
+                      {/* SUMMARY ROW: TOTAL AMOUNT */}
+                      <tr className="bg-red-50/10 text-[11px] font-extrabold text-smei-crimson border-b border-gray-200">
+                        <td colSpan={2} className="py-3.5 px-4 text-right uppercase tracking-wider">
+                          Total Amount (Parts + Tax):
+                        </td>
+                        {suppliers.map((s) => {
+                          const calc = supplierCalculations.find((c) => c.supplierId === s.id);
+                          return (
+                            <td key={s.id} className="py-3.5 px-4 text-right font-mono text-base">
+                              {new Intl.NumberFormat("en-PH", {
+                                style: "currency",
+                                currency: "PHP",
+                                minimumFractionDigits: 2,
+                              }).format(calc ? calc.total : 0)}
+                            </td>
+                          );
+                        })}
+                        {isEditMode && <td />}
+                      </tr>
                     </tbody>
                   </table>
                 </div>
               </div>
 
-              {/* Signatories Section */}
-              <div className="border-t border-gray-100 pt-4 mt-2">
-                <h4 className="text-xs font-bold text-smei-darkred uppercase tracking-wide mb-3">Workflow Signatories</h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Requested By (Canvasser)</label>
-                    <input
-                      type="text"
-                      disabled={!isEditMode}
-                      className="w-full text-sm p-2 border border-gray-200 rounded-lg bg-gray-50/50"
-                      value={requestedBy}
-                      onChange={(e) => setRequestedBy(e.target.value)}
-                    />
+              {/* AUTOMATIC SUMMARY CARDS AND RECOMMENDATIONS */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-50 border border-gray-200/60 rounded-xl p-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-3 bg-red-100 text-smei-crimson rounded-xl">
+                    <Calculator className="w-5 h-5" />
                   </div>
-
                   <div>
-                    <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Checked By (Supervisor)</label>
-                    <input
-                      type="text"
-                      disabled={!isEditMode}
-                      className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson"
-                      value={checkedBy}
-                      onChange={(e) => setCheckedBy(e.target.value)}
-                      placeholder="Supervisor name"
-                    />
+                    <span className="block text-[10px] text-gray-500 uppercase font-bold tracking-wider">
+                      Recommended Best Option (Lowest Bid)
+                    </span>
+                    <span className="block font-extrabold text-emerald-700 text-base uppercase tracking-wide">
+                      {recommended.name}
+                    </span>
                   </div>
+                </div>
 
+                <div className="flex items-center gap-3 border-t md:border-t-0 md:border-l border-gray-200 pt-3 md:pt-0 md:pl-4">
+                  <div className="p-3 bg-emerald-100 text-emerald-700 rounded-xl">
+                    <Calculator className="w-5 h-5" />
+                  </div>
                   <div>
-                    <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Approved By (Purchasing Manager)</label>
-                    <input
-                      type="text"
-                      disabled={!isEditMode}
-                      className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson"
-                      value={approvedBy}
-                      onChange={(e) => setApprovedBy(e.target.value)}
-                      placeholder="Manager name"
-                    />
+                    <span className="block text-[10px] text-gray-500 uppercase font-bold tracking-wider">
+                      Best Aggregate Procurement Cost
+                    </span>
+                    <span className="block font-mono font-extrabold text-emerald-700 text-base">
+                      {new Intl.NumberFormat("en-PH", {
+                        style: "currency",
+                        currency: "PHP",
+                        minimumFractionDigits: 2,
+                      }).format(recommended.total)}
+                    </span>
                   </div>
                 </div>
               </div>
 
-              {/* Form Buttons */}
+              {/* REMARKS */}
+              <div className="space-y-2">
+                <label className="block text-xs font-bold text-gray-700">Remarks / Recommendations</label>
+                <textarea
+                  disabled={!isEditMode}
+                  rows={2}
+                  className="w-full text-xs p-2.5 border border-gray-200 rounded-xl outline-none focus:ring-1 focus:ring-smei-crimson resize-none bg-white"
+                  value={remarks}
+                  onChange={(e) => setRemarks(e.target.value)}
+                  placeholder="Explain options selection reasoning, special instructions, or overall remarks..."
+                />
+              </div>
+
+              {/* SECTION 4: WORKFLOW SIGNATORIES */}
+              <div className="space-y-4">
+                <h4 className="text-xs font-bold text-smei-crimson uppercase tracking-wide border-b border-gray-100 pb-1.5">
+                  4. Document Workflow Signatories
+                </h4>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  {/* Prepared By */}
+                  <div className="space-y-1.5 p-3 border border-gray-100 bg-gray-50/30 rounded-xl">
+                    <span className="block text-[10px] uppercase font-bold text-gray-500 tracking-wider">1. Prepared By</span>
+                    <div>
+                      <input
+                        type="text"
+                        disabled={!isEditMode}
+                        className="w-full text-xs p-2 border rounded-md font-semibold border-gray-200"
+                        value={preparedBy}
+                        onChange={(e) => setPreparedBy(e.target.value)}
+                        placeholder="Prepared By Name"
+                      />
+                    </div>
+                    <div>
+                      <input
+                        type="text"
+                        disabled={!isEditMode}
+                        className="w-full text-[10px] p-1.5 border rounded-md border-gray-200"
+                        value={preparedByPosition}
+                        onChange={(e) => setPreparedByPosition(e.target.value)}
+                        placeholder="Prepared By Position"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Checked By */}
+                  <div className="space-y-1.5 p-3 border border-gray-100 bg-gray-50/30 rounded-xl">
+                    <span className="block text-[10px] uppercase font-bold text-gray-500 tracking-wider">2. Checked By</span>
+                    <div>
+                      <input
+                        type="text"
+                        disabled={!isEditMode}
+                        className="w-full text-xs p-2 border rounded-md font-semibold border-gray-200"
+                        value={checkedBy}
+                        onChange={(e) => setCheckedBy(e.target.value)}
+                        placeholder="Checked By Name"
+                      />
+                    </div>
+                    <div>
+                      <input
+                        type="text"
+                        disabled={!isEditMode}
+                        className="w-full text-[10px] p-1.5 border rounded-md border-gray-200"
+                        value={checkedByPosition}
+                        onChange={(e) => setCheckedByPosition(e.target.value)}
+                        placeholder="Checked By Position"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Verified By */}
+                  <div className="space-y-1.5 p-3 border border-gray-100 bg-gray-50/30 rounded-xl">
+                    <span className="block text-[10px] uppercase font-bold text-gray-500 tracking-wider">3. Verified By</span>
+                    <div>
+                      <input
+                        type="text"
+                        disabled={!isEditMode}
+                        className="w-full text-xs p-2 border rounded-md font-semibold border-gray-200"
+                        value={verifiedBy}
+                        onChange={(e) => setVerifiedBy(e.target.value)}
+                        placeholder="Verified By Name"
+                      />
+                    </div>
+                    <div>
+                      <input
+                        type="text"
+                        disabled={!isEditMode}
+                        className="w-full text-[10px] p-1.5 border rounded-md border-gray-200"
+                        value={verifiedByPosition}
+                        onChange={(e) => setVerifiedByPosition(e.target.value)}
+                        placeholder="Verified By Position"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Approved By */}
+                  <div className="space-y-1.5 p-3 border border-gray-100 bg-gray-50/30 rounded-xl">
+                    <span className="block text-[10px] uppercase font-bold text-gray-500 tracking-wider">4. Approved By</span>
+                    <div>
+                      <input
+                        type="text"
+                        disabled={!isEditMode}
+                        className="w-full text-xs p-2 border rounded-md font-semibold border-gray-200"
+                        value={approvedBy}
+                        onChange={(e) => setApprovedBy(e.target.value)}
+                        placeholder="Approved By Name"
+                      />
+                    </div>
+                    <div>
+                      <input
+                        type="text"
+                        disabled={!isEditMode}
+                        className="w-full text-[10px] p-1.5 border rounded-md border-gray-200"
+                        value={approvedByPosition}
+                        onChange={(e) => setApprovedByPosition(e.target.value)}
+                        placeholder="Approved By Position"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* FORM ACTION FOOTER */}
               <div className="flex items-center justify-end gap-2 border-t border-gray-100 pt-4 mt-6">
                 <button
                   type="button"

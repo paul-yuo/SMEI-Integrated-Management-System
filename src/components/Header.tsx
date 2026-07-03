@@ -260,10 +260,10 @@ export default function Header({
           <nav className="flex flex-nowrap items-center gap-1 md:gap-2 whitespace-nowrap">
             <button
               onClick={() => onNavigate("dashboard")}
-              className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all ${
+              className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
                 currentTab === "dashboard"
-                  ? "bg-[#B22222] text-white"
-                  : "text-gray-600 hover:text-[#B22222] hover:bg-gray-200 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
+                  ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
+                  : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
               }`}
             >
               Dashboard
@@ -271,10 +271,10 @@ export default function Header({
             
             <button
               onClick={() => onNavigate("po-list")}
-              className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all ${
+              className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
                 currentTab === "po-list" || currentTab === "po-form"
-                  ? "bg-[#B22222] text-white"
-                  : "text-gray-600 hover:text-[#B22222] hover:bg-gray-200 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
+                  ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
+                  : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
               }`}
             >
               Purchase Orders
@@ -282,10 +282,10 @@ export default function Header({
 
             <button
               onClick={() => onNavigate("suppliers")}
-              className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all ${
+              className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
                 currentTab === "suppliers"
-                  ? "bg-[#B22222] text-white"
-                  : "text-gray-600 hover:text-[#B22222] hover:bg-gray-200 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
+                  ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
+                  : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
               }`}
             >
               Suppliers
@@ -293,10 +293,10 @@ export default function Header({
 
             <button
               onClick={() => onNavigate("pis")}
-              className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all ${
+              className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
                 currentTab === "pis"
-                  ? "bg-[#B22222] text-white"
-                  : "text-gray-600 hover:text-[#B22222] hover:bg-gray-200 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
+                  ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
+                  : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
               }`}
             >
               PIS
@@ -304,10 +304,10 @@ export default function Header({
 
             <button
               onClick={() => onNavigate("rfs")}
-              className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all ${
+              className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
                 currentTab === "rfs"
-                  ? "bg-[#B22222] text-white"
-                  : "text-gray-600 hover:text-[#B22222] hover:bg-gray-200 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
+                  ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
+                  : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
               }`}
             >
               RFS
@@ -315,10 +315,10 @@ export default function Header({
 
             <button
               onClick={() => onNavigate("canvass")}
-              className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all ${
+              className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
                 currentTab === "canvass"
-                  ? "bg-[#B22222] text-white"
-                  : "text-gray-600 hover:text-[#B22222] hover:bg-gray-200 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
+                  ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
+                  : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
               }`}
             >
               Canvass
@@ -328,30 +328,30 @@ export default function Header({
               <>
                 <button
                   onClick={() => onNavigate("users")}
-                  className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all ${
+                  className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
                     currentTab === "users"
-                      ? "bg-[#B22222] text-white"
-                      : "text-gray-600 hover:text-[#B22222] hover:bg-gray-200 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
+                      ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
+                      : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
                   }`}
                 >
                   Users
                 </button>
                 <button
                   onClick={() => onNavigate("roles")}
-                  className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all ${
+                  className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
                     currentTab === "roles"
-                      ? "bg-[#B22222] text-white"
-                      : "text-gray-600 hover:text-[#B22222] hover:bg-gray-200 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
+                      ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
+                      : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
                   }`}
                 >
                   Roles
                 </button>
                 <button
                   onClick={() => onNavigate("audit-logs")}
-                  className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all ${
+                  className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
                     currentTab === "audit-logs"
-                      ? "bg-[#B22222] text-white"
-                      : "text-gray-600 hover:text-[#B22222] hover:bg-gray-200 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
+                      ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
+                      : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
                   }`}
                 >
                   Audit Trail

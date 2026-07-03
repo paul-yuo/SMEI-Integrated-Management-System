@@ -9,7 +9,9 @@ import { User, UserRole, Supplier, PurchaseOrder, AuditLog, Notification, POStat
 export function calculatePOFinancials(
   items: POItem[],
   category: string, // "Vatable" | "Zero Rated" | "VAT Exempt"
-  discountVatAmount: number = 0
+  discountVatAmount: number = 0,
+  partsRate: number = 0.01,
+  laborRate: number = 0.02
 ) {
   const totalAmount = items.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
   
@@ -20,7 +22,7 @@ export function calculatePOFinancials(
 
   const catLower = category.toLowerCase();
   if (catLower.includes("vatable")) {
-    vatableAmount = totalAmount / 1.12;
+    vatableAmount = Math.round((totalAmount / 1.12) * 100) / 100;
     vat12 = totalAmount - vatableAmount;
   } else if (catLower.includes("zero")) {
     zeroRatedAmount = totalAmount;
@@ -49,23 +51,23 @@ export function calculatePOFinancials(
   const partsBase = catLower.includes("vatable") ? (partsTotal / 1.12) : partsTotal;
   const laborBase = catLower.includes("vatable") ? (laborTotal / 1.12) : laborTotal;
 
-  const partsEwt1 = partsBase * 0.01;
-  const laborEwt2 = laborBase * 0.02;
+  const partsEwt1 = Math.round((partsBase * partsRate) * 100) / 100;
+  const laborEwt2 = Math.round((laborBase * laborRate) * 100) / 100;
   const ewtAdjustments = partsEwt1 + laborEwt2;
 
   // Gross Amount = Total Amount + EWT Adjustments
-  const grossAmount = totalAmount + ewtAdjustments;
+  const grossAmount = Math.round((totalAmount + ewtAdjustments) * 100) / 100;
 
   // TOTAL = Final Computed Amount
-  const total = totalAmount - partsEwt1 - laborEwt2 - discountVatAmount;
+  const total = Math.round((totalAmount - partsEwt1 - laborEwt2 - discountVatAmount) * 100) / 100;
 
   return {
     grossAmount,
     vatableAmount,
-    vat12,
-    vatExemptAmount,
-    zeroRatedAmount,
-    discountVatAmount,
+    vat12: Math.round(vat12 * 100) / 100,
+    vatExemptAmount: Math.round(vatExemptAmount * 100) / 100,
+    zeroRatedAmount: Math.round(zeroRatedAmount * 100) / 100,
+    discountVatAmount: Math.round(discountVatAmount * 100) / 100,
     partsEwt1,
     laborEwt2,
     ewtAdjustments,

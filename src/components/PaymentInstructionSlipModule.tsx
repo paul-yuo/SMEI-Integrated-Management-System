@@ -8,7 +8,7 @@ import { PaymentInstructionSlip, User, UserRole } from "../types";
 import { api } from "../lib/api";
 import { Search, Plus, Filter, Calendar, FileText, ArrowUpDown, Trash2, Edit3, Eye, FileSpreadsheet, X, Download } from "lucide-react";
 import { exportWordWithTemplate, exportExcelWithTemplate } from "../utils/templateExport";
-import { ExportExcelButton, CreateButton, exportListToExcel } from "./SharedButtons";
+import { ExportExcelButton, CreateButton } from "./SharedButtons";
 import { TableSkeleton } from "./ui/Skeleton";
 
 interface PISModuleProps {
@@ -72,6 +72,10 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
     try {
       const data = await api.getPIS();
       setSlips(data);
+      if (data && data.length > 0) {
+        setActiveSlipId(data[data.length - 1].id);
+        setSelectedSlip(data[data.length - 1]);
+      }
     } catch (err) {
       console.error("Error fetching PIS slips:", err);
     } finally {
@@ -275,6 +279,10 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
 
   // Template-based Export
   const handleExport = async (slip: PaymentInstructionSlip, format: "word" | "excel") => {
+     console.log("===== HANDLE EXPORT =====");
+      console.log("Format:", format);
+      console.log("PIS:", slip.pisNumber);
+
     const formattedAmount = new Intl.NumberFormat("en-PH", {
       style: "currency",
       currency: slip.currency === "PHP" ? "PHP" : "USD",
@@ -316,6 +324,7 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
     if (format === "word") {
       await exportWordWithTemplate("PIS_TEMPLATE.docx", exportData, `${slip.pisNumber}_SMEI_PIS.docx`);
     } else {
+      console.log("Calling exportExcelWithTemplate...");
       await exportExcelWithTemplate("PIS_TEMPLATE.xlsx", exportData, "items", [], `${slip.pisNumber}_SMEI_PIS.xlsx`);
     }
   };
@@ -328,17 +337,29 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
     Cancelled: "bg-rose-50 text-rose-700 border-rose-300"
   };
 
-  const handleExportExcel = () => {
-    const dataToExport = filteredSlips.map(slip => ({
-      "PIS Number": slip.pisNumber,
-      "Date": slip.requestedDate,
-      "Payee": slip.payee,
-      "Amount": slip.amount,
-      "Currency": slip.currency,
-      "Status": slip.status
-    }));
-    exportListToExcel(dataToExport, "Payment_Instruction_Slips");
+  const handleExportExcel = async () => {
+    console.log("===== GREEN EXPORT BUTTON =====");
+
+    if (!activeSlipId) {
+      console.log("No PIS active row selected");
+      alert("Please select one Payment Instruction Slip first.");
+      return;
+    }
+
+    const slipToExport = slips.find((s) => s.id === activeSlipId);
+
+    if (!slipToExport) {
+      console.log("No matching slip found for ID:", activeSlipId);
+      alert("Please select one Payment Instruction Slip first.");
+      return;
+    }
+
+    console.log("Selected PIS:", slipToExport.pisNumber);
+    await handleExport(slipToExport, "excel");
+    console.log("handleExport finished");
   };
+
+
 
   return (
     <div id="smei-pis-list" className="p-6 md:p-10 space-y-6 max-w-7xl mx-auto">
@@ -418,7 +439,7 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
           <div className="flex items-center justify-end gap-2 w-full md:w-auto ml-auto">
             <ExportExcelButton onClick={handleExportExcel} />
             {isAuthorized && (
-              <CreateButton onClick={() => handleOpenModal(null)} label="Create PIS Slip" />
+              <CreateButton onClick={() => handleOpenModal(null)} label="Create PIS" />
             )}
           </div>
         </div>
@@ -438,7 +459,7 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
               <th className="py-4 px-6 text-center">Actions</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="text-xs">
             {loading ? (
               <TableSkeleton rows={5} columns={7} />
             ) : paginatedSlips.length === 0 ? (
@@ -451,7 +472,10 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
               filteredSlips.map((slip, idx) => (
                 <tr
                   key={slip.id}
-                  onClick={() => setActiveSlipId(slip.id)}
+                  onClick={() => {
+                      setActiveSlipId(slip.id);
+                      setSelectedSlip(slip);
+                  }}
                   onDoubleClick={() => handleOpenModal(slip, isAuthorized)}
                   className={`cursor-pointer transition-all border-b border-gray-50/60 group ${
                     activeSlipId === slip.id
@@ -510,21 +534,7 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
                         </button>
                       )}
 
-                      <button
-                        onClick={() => handleExport(slip, "word")}
-                        className="p-1 hover:bg-indigo-50 hover:text-indigo-600 text-gray-400 rounded transition-all"
-                        title="Export to Word"
-                      >
-                        <FileText className="w-4 h-4" />
-                      </button>
 
-                      <button
-                        onClick={() => handleExport(slip, "excel")}
-                        className="p-1 hover:bg-emerald-50 hover:text-emerald-600 text-gray-400 rounded transition-all"
-                        title="Export to Excel"
-                      >
-                        <FileSpreadsheet className="w-4 h-4" />
-                      </button>
 
                       {isAuthorized && (
                         <button
@@ -623,13 +633,12 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
                 <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-4 bg-gray-50/80 p-4 rounded-xl border border-gray-100">
                   {/* Gross */}
                   <div>
-                    <label className="block text-xs font-bold text-gray-700 mb-1">Gross Amount: *</label>
+                    <label className="block text-xs font-bold text-gray-700 mb-1">Gross Amount:</label>
                     <div className="relative">
                       <span className="absolute left-3 top-2 text-xs font-bold text-gray-400">₱</span>
                       <input
                         type="number"
                         step="any"
-                        required
                         disabled={!isEditMode}
                         placeholder="0.00"
                         className={`w-full text-sm pl-7 pr-2 p-2 border rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson bg-white outline-none ${
@@ -644,12 +653,11 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
 
                   {/* EWT (%) */}
                   <div>
-                    <label className="block text-xs font-bold text-gray-700 mb-1">EWT (%): *</label>
+                    <label className="block text-xs font-bold text-gray-700 mb-1">EWT (%):</label>
                     <div className="relative">
                       <input
                         type="number"
                         step="any"
-                        required
                         disabled={!isEditMode}
                         placeholder="0.00"
                         className={`w-full text-sm pr-7 p-2 border rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson bg-white outline-none ${

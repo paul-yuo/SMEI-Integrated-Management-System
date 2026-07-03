@@ -81,6 +81,8 @@ export default function POForm({
   const [vat12, setVat12] = useState(0);
   const [vatExemptAmount, setVatExemptAmount] = useState(0);
   const [zeroRatedAmount, setZeroRatedAmount] = useState(0);
+  const [partsEwtRate, setPartsEwtRate] = useState(0.01);
+  const [laborEwtRate, setLaborEwtRate] = useState(0.02);
   const [partsEwt1, setPartsEwt1] = useState(0);
   const [laborEwt2, setLaborEwt2] = useState(0);
   const [totalAmount, setTotalAmount] = useState(0);
@@ -99,18 +101,21 @@ export default function POForm({
   // 5. Workflow States
   const [status, setStatus] = useState<POStatus>("Draft");
   const [preparedBy, setPreparedBy] = useState("VICEDO, Lalaine");
-  const [checkedBy, setCheckedBy] = useState("ROGADOR, Aprilyn");
-  const [verifiedBy, setVerifiedBy] = useState("MILANTE, Maria Morena");
+  const [checkedBy, setCheckedBy] = useState("ORONGAN, Eliza C.");
+  const [verifiedBy, setVerifiedBy] = useState("ROGADOR, Aprilyn");
   const [approvedBy, setApprovedBy] = useState("Agnes C. Vallejo");
   const [conforme, setConforme] = useState("");
   const [preparedByTitle, setPreparedByTitle] = useState("Impex/Purchasing Staff");
-  const [checkedByTitle, setCheckedByTitle] = useState("Asst. Admin/Technical Manager");
-  const [verifiedByTitle, setVerifiedByTitle] = useState("Asst. Accounting Manager");
+  const [checkedByTitle, setCheckedByTitle] = useState("Admin asst. Leader");
+  const [verifiedByTitle, setVerifiedByTitle] = useState("Asst.Admin/Technical Manager");
+  const [verifiedBy2, setVerifiedBy2] = useState("MILANTE, Maria Morena");
+  const [verifiedBy2Title, setVerifiedBy2Title] = useState("Asst. Accounting Manager");
   const [approvedByTitle, setApprovedByTitle] = useState("Director");
   const [conformeTitle, setConformeTitle] = useState("Print name over the signature");
   const [excludePreparedBy, setExcludePreparedBy] = useState(false);
   const [excludeCheckedBy, setExcludeCheckedBy] = useState(false);
   const [excludeVerifiedBy, setExcludeVerifiedBy] = useState(false);
+  const [excludeVerifiedBy2, setExcludeVerifiedBy2] = useState(false);
   const [excludeApprovedBy, setExcludeApprovedBy] = useState(false);
   const [excludeConforme, setExcludeConforme] = useState(false);
   const [additionalSignatories, setAdditionalSignatories] = useState<Signatory[]>([]);
@@ -165,11 +170,13 @@ export default function POForm({
     preparedBy,
     checkedBy,
     verifiedBy,
+    verifiedBy2,
     approvedBy,
     conforme,
     excludePreparedBy,
     excludeCheckedBy,
     excludeVerifiedBy,
+    excludeVerifiedBy2,
     excludeApprovedBy,
     excludeConforme,
     additionalSignatories,
@@ -284,9 +291,11 @@ export default function POForm({
       setPreparedBy(po.preparedBy);
       setPreparedByTitle(po.preparedByTitle || "Impex/Purchasing Staff");
       setCheckedBy(po.checkedBy || "");
-      setCheckedByTitle(po.checkedByTitle || "Asst. Admin/Technical Manager");
+      setCheckedByTitle(po.checkedByTitle || "Admin asst. Leader");
       setVerifiedBy(po.verifiedBy || "");
-      setVerifiedByTitle(po.verifiedByTitle || "Asst. Accounting Manager");
+      setVerifiedByTitle(po.verifiedByTitle || "Asst.Admin/Technical Manager");
+      setVerifiedBy2(po.verifiedBy2 || "");
+      setVerifiedBy2Title(po.verifiedBy2Title || "Asst. Accounting Manager");
       setApprovedBy(po.approvedBy || "");
       setApprovedByTitle(po.approvedByTitle || "Director");
       setConforme(po.conforme || "");
@@ -294,6 +303,7 @@ export default function POForm({
       setExcludePreparedBy(!!po.excludePreparedBy);
       setExcludeCheckedBy(!!po.excludeCheckedBy);
       setExcludeVerifiedBy(!!po.excludeVerifiedBy);
+      setExcludeVerifiedBy2(!!po.excludeVerifiedBy2);
       setExcludeApprovedBy(!!po.excludeApprovedBy);
       setExcludeConforme(!!po.excludeConforme);
       setAdditionalSignatories(po.additionalSignatories || []);
@@ -307,10 +317,12 @@ export default function POForm({
       setDeliveryDate(new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]);
       setPreparedBy("VICEDO, Lalaine");
       setPreparedByTitle("Impex/Purchasing Staff");
-      setCheckedBy("ROGADOR, Aprilyn");
-      setCheckedByTitle("Asst. Admin/Technical Manager");
-      setVerifiedBy("MILANTE, Maria Morena");
-      setVerifiedByTitle("Asst. Accounting Manager");
+      setCheckedBy("ORONGAN, Eliza C.");
+      setCheckedByTitle("Admin asst. Leader");
+      setVerifiedBy("ROGADOR, Aprilyn");
+      setVerifiedByTitle("Asst.Admin/Technical Manager");
+      setVerifiedBy2("MILANTE, Maria Morena");
+      setVerifiedBy2Title("Asst. Accounting Manager");
       setApprovedBy("Agnes C. Vallejo");
       setApprovedByTitle("Director");
       setConforme("");
@@ -327,14 +339,15 @@ export default function POForm({
       setExcludePreparedBy(false);
       setExcludeCheckedBy(false);
       setExcludeVerifiedBy(false);
+      setExcludeVerifiedBy2(false);
       setExcludeApprovedBy(false);
       setExcludeConforme(false);
-      setRfsNumber("");
+      setRfsNumber("2026-07-001");
     }
   }, [po, currentUser]);
 
   // 7. Auto-Calculate Financials on items/category change (unless manually overriden)
-  const computed = calculatePOFinancials(items, category, discountVatAmount);
+  const computed = calculatePOFinancials(items, category, discountVatAmount, partsEwtRate, laborEwtRate);
 
   // Sync Payment Terms
   useEffect(() => {
@@ -364,7 +377,7 @@ export default function POForm({
       setLaborEwt2(computed.laborEwt2);
       setTotalAmount(computed.totalAmount);
     }
-  }, [items, category, discountVatAmount, overrideVat]);
+  }, [items, category, discountVatAmount, overrideVat, partsEwtRate, laborEwtRate]);
 
   // Auto calculate when reset
   const handleResetToAuto = () => {
@@ -537,6 +550,8 @@ export default function POForm({
       checkedByTitle: excludeCheckedBy ? "" : (checkedByTitle || ""),
       verifiedBy: excludeVerifiedBy ? "" : (verifiedBy || ""),
       verifiedByTitle: excludeVerifiedBy ? "" : (verifiedByTitle || ""),
+      verifiedBy2: excludeVerifiedBy2 ? "" : (verifiedBy2 || ""),
+      verifiedBy2Title: excludeVerifiedBy2 ? "" : (verifiedBy2Title || ""),
       approvedBy: excludeApprovedBy ? "" : (approvedBy || ""),
       approvedByTitle: excludeApprovedBy ? "" : (approvedByTitle || ""),
       conforme: excludeConforme ? "" : (conforme || ""),
@@ -544,6 +559,7 @@ export default function POForm({
       excludePreparedBy,
       excludeCheckedBy,
       excludeVerifiedBy,
+      excludeVerifiedBy2,
       excludeApprovedBy,
       excludeConforme,
       additionalSignatories,
@@ -1589,9 +1605,23 @@ export default function POForm({
                 </span>
               </div>
 
-              {/* Parts EWT (1%) */}
+              {/* Parts EWT */}
               <div className="flex items-center justify-between">
-                <span className="text-gray-500 font-medium">Parts EWT (1%)</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-500 font-medium">Parts EWT:</span>
+                  <select
+                    value={partsEwtRate}
+                    onChange={(e) => setPartsEwtRate(parseFloat(e.target.value))}
+                    disabled={overrideVat}
+                    className="text-xs border border-gray-200 rounded p-1 outline-none bg-white"
+                  >
+                    <option value={0}>0%</option>
+                    <option value={0.01}>1%</option>
+                    <option value={0.02}>2%</option>
+                    <option value={0.05}>5%</option>
+                    <option value={0.10}>10%</option>
+                  </select>
+                </div>
                 <input
                   type="number"
                   disabled={!overrideVat}
@@ -1601,9 +1631,23 @@ export default function POForm({
                 />
               </div>
 
-              {/* Labor EWT (2%) */}
+              {/* Labor EWT */}
               <div className="flex items-center justify-between">
-                <span className="text-gray-500 font-medium">Labor EWT (2%)</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-500 font-medium">Labor EWT:</span>
+                  <select
+                    value={laborEwtRate}
+                    onChange={(e) => setLaborEwtRate(parseFloat(e.target.value))}
+                    disabled={overrideVat}
+                    className="text-xs border border-gray-200 rounded p-1 outline-none bg-white"
+                  >
+                    <option value={0}>0%</option>
+                    <option value={0.01}>1%</option>
+                    <option value={0.02}>2%</option>
+                    <option value={0.05}>5%</option>
+                    <option value={0.10}>10%</option>
+                  </select>
+                </div>
                 <input
                   type="number"
                   disabled={!overrideVat}
@@ -1644,8 +1688,8 @@ export default function POForm({
             </h3>
             <div className="flex items-center gap-3 text-[10px] no-print">
               {/* Restore menu for deleted signatories */}
-              {(excludePreparedBy || excludeCheckedBy || excludeVerifiedBy || excludeApprovedBy || excludeConforme) && (
-                <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 px-2.5 py-1 rounded-lg text-[9px] text-gray-500 font-medium font-sans">
+              {(excludePreparedBy || excludeCheckedBy || excludeVerifiedBy || excludeVerifiedBy2 || excludeApprovedBy || excludeConforme) && (
+                <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 px-2.5 py-1 rounded-lg text-[9px] text-gray-500 font-medium font-sans flex-wrap">
                   <span className="font-bold text-gray-400">Restore:</span>
                   {excludePreparedBy && (
                     <button
@@ -1665,12 +1709,12 @@ export default function POForm({
                       type="button"
                       onClick={() => {
                         setExcludeCheckedBy(false);
-                        setCheckedBy("ROGADOR, Aprilyn");
-                        setCheckedByTitle("Asst. Admin/Technical Manager");
+                        setCheckedBy("ORONGAN, Eliza C.");
+                        setCheckedByTitle("Admin asst. Leader");
                       }}
                       className="text-blue-600 hover:text-blue-800 font-bold hover:underline ml-1"
                     >
-                      Checked By
+                      Check By
                     </button>
                   )}
                   {excludeVerifiedBy && (
@@ -1678,12 +1722,25 @@ export default function POForm({
                       type="button"
                       onClick={() => {
                         setExcludeVerifiedBy(false);
-                        setVerifiedBy("MILANTE, Maria Morena");
-                        setVerifiedByTitle("Asst. Accounting Manager");
+                        setVerifiedBy("ROGADOR, Aprilyn");
+                        setVerifiedByTitle("Asst.Admin/Technical Manager");
                       }}
                       className="text-blue-600 hover:text-blue-800 font-bold hover:underline ml-1"
                     >
-                      Verified By
+                      Verified By (1)
+                    </button>
+                  )}
+                  {excludeVerifiedBy2 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExcludeVerifiedBy2(false);
+                        setVerifiedBy2("MILANTE, Maria Morena");
+                        setVerifiedBy2Title("Asst. Accounting Manager");
+                      }}
+                      className="text-blue-600 hover:text-blue-800 font-bold hover:underline ml-1"
+                    >
+                      Verified By (2)
                     </button>
                   )}
                   {excludeApprovedBy && (
@@ -1781,60 +1838,8 @@ export default function POForm({
               )}
             </div>
 
-            {/* Row 1, Right: Approved By */}
+            {/* Row 1, Right: Check By */}
             <div className="md:col-start-2 md:row-start-1">
-              {!excludeApprovedBy && (
-                <div className="flex flex-col relative w-64">
-                  <div className="flex items-center justify-between no-print">
-                    <span className="font-bold text-gray-400 uppercase tracking-wider text-[10px]">4. Approved By</span>
-                    <div className="flex items-center gap-1.5">
-                      {!approvedBy.trim() && (
-                        <AlertTriangle className="w-3.5 h-3.5 text-amber-500 animate-pulse" title="Warning: Signatory is blank!" />
-                      )}
-                      {!isViewer && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setExcludeApprovedBy(true);
-                            setApprovedBy("");
-                            setApprovedByTitle("");
-                          }}
-                          className="text-gray-300 hover:text-red-500 transition-colors"
-                          title="Delete Signatory"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  
-                  <div className="font-bold text-gray-900 text-sm mt-1">Approved by:</div>
-                  <div className="h-14"></div>
-                  <div className="border-b border-black w-64 my-1"></div>
-                  
-                  <input
-                    type="text"
-                    value={approvedBy}
-                    onChange={(e) => setApprovedBy(e.target.value)}
-                    disabled={isViewer || (status !== "Draft" && !isAdmin && status !== "Pending Approval")}
-                    placeholder="Enter Name"
-                    className="w-full font-sans font-bold text-gray-900 text-sm bg-transparent border-0 outline-none focus:ring-0 p-0 hover:bg-gray-100/50 rounded text-left transition-colors"
-                  />
-                  
-                  <input
-                    type="text"
-                    value={approvedByTitle}
-                    onChange={(e) => setApprovedByTitle(e.target.value)}
-                    disabled={isViewer || (status !== "Draft" && !isAdmin)}
-                    placeholder="Enter Title"
-                    className="w-full text-gray-500 text-[11px] bg-transparent border-0 outline-none focus:ring-0 p-0 hover:bg-gray-100/50 rounded text-left transition-colors"
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* Row 2, Left: Check By */}
-            <div className="md:col-start-1 md:row-start-2">
               {!excludeCheckedBy && (
                 <div className="flex flex-col relative w-64">
                   <div className="flex items-center justify-between no-print">
@@ -1885,12 +1890,168 @@ export default function POForm({
               )}
             </div>
 
-            {/* Row 2, Right: Conforme */}
+            {/* Row 2, Left: Verified By */}
+            <div className="md:col-start-1 md:row-start-2">
+              {!excludeVerifiedBy && (
+                <div className="flex flex-col relative w-64">
+                  <div className="flex items-center justify-between no-print">
+                    <span className="font-bold text-gray-400 uppercase tracking-wider text-[10px]">3. Verified By</span>
+                    <div className="flex items-center gap-1.5">
+                      {!verifiedBy.trim() && (
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-500 animate-pulse" title="Warning: Signatory is blank!" />
+                      )}
+                      {!isViewer && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExcludeVerifiedBy(true);
+                            setVerifiedBy("");
+                            setVerifiedByTitle("");
+                          }}
+                          className="text-gray-300 hover:text-red-500 transition-colors"
+                          title="Delete Signatory"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div className="font-bold text-gray-900 text-sm mt-1">Verified by:</div>
+                  <div className="h-14"></div>
+                  <div className="border-b border-black w-64 my-1"></div>
+                  
+                  <input
+                    type="text"
+                    value={verifiedBy}
+                    onChange={(e) => setVerifiedBy(e.target.value)}
+                    disabled={isViewer || (status !== "Draft" && !isAdmin && status !== "Pending Verification")}
+                    placeholder="Enter Name"
+                    className="w-full font-sans font-bold text-gray-900 text-sm bg-transparent border-0 outline-none focus:ring-0 p-0 hover:bg-gray-100/50 rounded text-left transition-colors"
+                  />
+                  
+                  <input
+                    type="text"
+                    value={verifiedByTitle}
+                    onChange={(e) => setVerifiedByTitle(e.target.value)}
+                    disabled={isViewer || (status !== "Draft" && !isAdmin)}
+                    placeholder="Enter Title"
+                    className="w-full text-gray-500 text-[11px] bg-transparent border-0 outline-none focus:ring-0 p-0 hover:bg-gray-100/50 rounded text-left transition-colors"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Row 2, Right: Verified By (2) */}
             <div className="md:col-start-2 md:row-start-2">
+              {!excludeVerifiedBy2 && (
+                <div className="flex flex-col relative w-64">
+                  <div className="flex items-center justify-between no-print">
+                    <span className="font-bold text-gray-400 uppercase tracking-wider text-[10px]">4. Verified By (2)</span>
+                    <div className="flex items-center gap-1.5">
+                      {!verifiedBy2.trim() && (
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-500 animate-pulse" title="Warning: Signatory is blank!" />
+                      )}
+                      {!isViewer && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExcludeVerifiedBy2(true);
+                            setVerifiedBy2("");
+                            setVerifiedBy2Title("");
+                          }}
+                          className="text-gray-300 hover:text-red-500 transition-colors"
+                          title="Delete Signatory"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div className="font-bold text-gray-900 text-sm mt-1">Verified by:</div>
+                  <div className="h-14"></div>
+                  <div className="border-b border-black w-64 my-1"></div>
+                  
+                  <input
+                    type="text"
+                    value={verifiedBy2}
+                    onChange={(e) => setVerifiedBy2(e.target.value)}
+                    disabled={isViewer || (status !== "Draft" && !isAdmin && status !== "Pending Verification")}
+                    placeholder="Enter Name"
+                    className="w-full font-sans font-bold text-gray-900 text-sm bg-transparent border-0 outline-none focus:ring-0 p-0 hover:bg-gray-100/50 rounded text-left transition-colors"
+                  />
+                  
+                  <input
+                    type="text"
+                    value={verifiedBy2Title}
+                    onChange={(e) => setVerifiedBy2Title(e.target.value)}
+                    disabled={isViewer || (status !== "Draft" && !isAdmin)}
+                    placeholder="Enter Title"
+                    className="w-full text-gray-500 text-[11px] bg-transparent border-0 outline-none focus:ring-0 p-0 hover:bg-gray-100/50 rounded text-left transition-colors"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Row 3, Left: Approved By */}
+            <div className="md:col-start-1 md:row-start-3">
+              {!excludeApprovedBy && (
+                <div className="flex flex-col relative w-64">
+                  <div className="flex items-center justify-between no-print">
+                    <span className="font-bold text-gray-400 uppercase tracking-wider text-[10px]">5. Approved By</span>
+                    <div className="flex items-center gap-1.5">
+                      {!approvedBy.trim() && (
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-500 animate-pulse" title="Warning: Signatory is blank!" />
+                      )}
+                      {!isViewer && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExcludeApprovedBy(true);
+                            setApprovedBy("");
+                            setApprovedByTitle("");
+                          }}
+                          className="text-gray-300 hover:text-red-500 transition-colors"
+                          title="Delete Signatory"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div className="font-bold text-gray-900 text-sm mt-1">Approved by:</div>
+                  <div className="h-14"></div>
+                  <div className="border-b border-black w-64 my-1"></div>
+                  
+                  <input
+                    type="text"
+                    value={approvedBy}
+                    onChange={(e) => setApprovedBy(e.target.value)}
+                    disabled={isViewer || (status !== "Draft" && !isAdmin && status !== "Pending Approval")}
+                    placeholder="Enter Name"
+                    className="w-full font-sans font-bold text-gray-900 text-sm bg-transparent border-0 outline-none focus:ring-0 p-0 hover:bg-gray-100/50 rounded text-left transition-colors"
+                  />
+                  
+                  <input
+                    type="text"
+                    value={approvedByTitle}
+                    onChange={(e) => setApprovedByTitle(e.target.value)}
+                    disabled={isViewer || (status !== "Draft" && !isAdmin)}
+                    placeholder="Enter Title"
+                    className="w-full text-gray-500 text-[11px] bg-transparent border-0 outline-none focus:ring-0 p-0 hover:bg-gray-100/50 rounded text-left transition-colors"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Row 3, Right: Conforme */}
+            <div className="md:col-start-2 md:row-start-3">
               {!excludeConforme && (
                 <div className="flex flex-col relative w-64">
                   <div className="flex items-center justify-between no-print">
-                    <span className="font-bold text-gray-400 uppercase tracking-wider text-[10px]">5. Conforme</span>
+                    <span className="font-bold text-gray-400 uppercase tracking-wider text-[10px]">6. Conforme</span>
                     <div className="flex items-center gap-1.5">
                       {!isViewer && (
                         <button
@@ -1946,61 +2107,6 @@ export default function POForm({
                 </div>
               )}
             </div>
-
-            {/* Row 3, Left: Verified By */}
-            <div className="md:col-start-1 md:row-start-3">
-              {!excludeVerifiedBy && (
-                <div className="flex flex-col relative w-64">
-                  <div className="flex items-center justify-between no-print">
-                    <span className="font-bold text-gray-400 uppercase tracking-wider text-[10px]">3. Verified By</span>
-                    <div className="flex items-center gap-1.5">
-                      {!verifiedBy.trim() && (
-                        <AlertTriangle className="w-3.5 h-3.5 text-amber-500 animate-pulse" title="Warning: Signatory is blank!" />
-                      )}
-                      {!isViewer && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setExcludeVerifiedBy(true);
-                            setVerifiedBy("");
-                            setVerifiedByTitle("");
-                          }}
-                          className="text-gray-300 hover:text-red-500 transition-colors"
-                          title="Delete Signatory"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  
-                  <div className="font-bold text-gray-900 text-sm mt-1">Verified by:</div>
-                  <div className="h-14"></div>
-                  <div className="border-b border-black w-64 my-1"></div>
-                  
-                  <input
-                    type="text"
-                    value={verifiedBy}
-                    onChange={(e) => setVerifiedBy(e.target.value)}
-                    disabled={isViewer || (status !== "Draft" && !isAdmin && status !== "Pending Verification")}
-                    placeholder="Enter Name"
-                    className="w-full font-sans font-bold text-gray-900 text-sm bg-transparent border-0 outline-none focus:ring-0 p-0 hover:bg-gray-100/50 rounded text-left transition-colors"
-                  />
-                  
-                  <input
-                    type="text"
-                    value={verifiedByTitle}
-                    onChange={(e) => setVerifiedByTitle(e.target.value)}
-                    disabled={isViewer || (status !== "Draft" && !isAdmin)}
-                    placeholder="Enter Title"
-                    className="w-full text-gray-500 text-[11px] bg-transparent border-0 outline-none focus:ring-0 p-0 hover:bg-gray-100/50 rounded text-left transition-colors"
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* Row 3, Right: Empty structural spacer */}
-            <div className="hidden md:block md:col-start-2 md:row-start-3 h-24"></div>
 
             {/* Additional Signatories */}
             {additionalSignatories.length > 0 && (

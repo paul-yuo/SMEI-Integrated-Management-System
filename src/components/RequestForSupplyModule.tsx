@@ -64,6 +64,10 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
     try {
       const data = await api.getRFS();
       setRequests(data);
+      if (data && data.length > 0) {
+        setActiveRfsId(data[data.length - 1].id);
+        setSelectedRFS(data[data.length - 1]);
+      }
     } catch (err) {
       console.error("Error fetching RFS:", err);
     } finally {
@@ -241,22 +245,11 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
     // Client-side Validations
     const newErrors: Record<string, string> = {};
     
-    let finalControlNumber = controlNumber.trim();
-    if (!finalControlNumber) {
-      newErrors.controlNumber = "Control number is required.";
-    } else if (/^\d+$/.test(finalControlNumber)) {
-      finalControlNumber = finalControlNumber.padStart(5, "0");
-      setControlNumber(finalControlNumber);
-    } else {
-      newErrors.controlNumber = "Control number must be numeric.";
-    }
-    
     if (!purpose.trim()) newErrors.purpose = "Purpose is required.";
     if (!dateRequested) newErrors.dateRequested = "Requested date is required.";
-    if (!dueDate) newErrors.dueDate = "Due date is required.";
     
     if (!rfsNumber.trim()) {
-      newErrors.rfsNumber = "RFS Number is required.";
+      newErrors.rfsNumber = "Control No is required.";
     } else {
       const format = /^\d{4}-\d{2}-\d{3}$/;
       if (!format.test(rfsNumber)) {
@@ -289,10 +282,10 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
     const payload: Partial<RequestForSupply> = {
       rfsNumber,
       dateRequested,
-      dueDate,
+      dueDate: dueDate || "",
       department,
       departmentOthers: department === "Others" ? departmentOthers : "",
-      controlNumber,
+      controlNumber: "",
       purchaseOrderNumber,
       items,
       status,
@@ -334,10 +327,10 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
     const exportData = {
       RFS_NO: req.rfsNumber,
       REQUEST_DATE: req.dateRequested,
-      DUE_DATE: req.dueDate,
-      RECEIVED_DATE: req.dueDate, // Map to template placeholder
+      DUE_DATE: req.dueDate || "",
+      RECEIVED_DATE: req.dueDate || "", // Map to template placeholder
       DEPARTMENT: req.department === "Others" ? req.departmentOthers : req.department,
-      CONTROL_NO: req.controlNumber,
+      CONTROL_NO: req.rfsNumber,
       PO_NO: req.purchaseOrderNumber || "N/A",
       STATUS: req.status,
       MODE: req.modeOfRequest,
@@ -472,7 +465,7 @@ const handleExportExcel = async () => {
           <div className="flex items-center justify-end gap-2 w-full md:w-auto ml-auto">
             <ExportExcelButton onClick={handleExportExcel} />
             {isAuthorized && (
-              <CreateButton onClick={() => handleOpenModal(null)} label="Create RFS Request" />
+              <CreateButton onClick={() => handleOpenModal(null)} label="Create RFS" />
             )}
           </div>
         </div>
@@ -483,8 +476,7 @@ const handleExportExcel = async () => {
         <table className="w-full text-left border-collapse min-w-[1000px]">
           <thead>
             <tr className="bg-red-50/20 text-gray-600 border-b border-gray-100 text-[11px] font-bold uppercase tracking-wider">
-              <th className="py-4 px-6">RFS Number</th>
-              <th className="py-4 px-6">Control No</th>
+              <th className="py-4 px-6">Control No.</th>
               <th className="py-4 px-6">Department</th>
               <th className="py-4 px-6">Date Requested</th>
               <th className="py-4 px-6">Due Date</th>
@@ -504,24 +496,30 @@ const handleExportExcel = async () => {
               </tr>
             ) : (
               filteredRequests.map((req, idx) => (
-               <tr
-                    key={req.id}
-                    onClick={() => setSelectedRFS(req)}
-                    className={`cursor-pointer ${
-                        selectedRFS?.id === req.id
-                            ? "bg-red-50"
-                            : ""
-                    }`}
+                <tr
+                  key={req.id}
+                  onClick={() => {
+                    setActiveRfsId(req.id);
+                    setSelectedRFS(req);
+                  }}
+                  onDoubleClick={() => handleOpenModal(req, false)}
+                  className={`cursor-pointer transition-all border-b border-gray-50/60 group ${
+                    selectedRFS?.id === req.id
+                      ? "bg-red-600/20 border-l-4 border-l-smei-crimson font-medium"
+                      : idx % 2 === 1
+                      ? "bg-gray-50/30 hover:bg-red-600/10"
+                      : "bg-white hover:bg-red-600/10"
+                  }`}
+                  title="Double-click to View details"
                 >
                   <td className="py-3 px-6 font-mono font-bold text-smei-darkred">
                     <div className="flex items-center gap-2">
-                      {activeRfsId === req.id && (
+                      {selectedRFS?.id === req.id && (
                         <div className="w-1.5 h-1.5 bg-smei-crimson rounded-full animate-pulse shrink-0" />
                       )}
                       <span>{req.rfsNumber}</span>
                     </div>
                   </td>
-                  <td className="py-3 px-6 text-gray-800 font-medium font-mono">{req.controlNumber}</td>
                   <td className="py-3 px-6 text-gray-700 font-semibold text-xs">
                     {req.department === "Others" ? req.departmentOthers : req.department}
                   </td>
@@ -557,21 +555,7 @@ const handleExportExcel = async () => {
                         </button>
                       )}
 
-                      <button
-                        onClick={() => handleExport(req, "word")}
-                        className="p-1 hover:bg-indigo-50 hover:text-indigo-600 text-gray-400 rounded transition-all"
-                        title="Export to Word"
-                      >
-                        <FileText className="w-4 h-4" />
-                      </button>
 
-                      <button
-                        onClick={() => handleExport(req, "excel")}
-                        className="p-1 hover:bg-emerald-50 hover:text-emerald-600 text-gray-400 rounded transition-all"
-                        title="Export to Excel"
-                      >
-                        <FileSpreadsheet className="w-4 h-4" />
-                      </button>
 
                       {isAuthorized && (
                         <button
@@ -614,10 +598,10 @@ const handleExportExcel = async () => {
                 </div>
               )}
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* RFS Number */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Control Number */}
                 <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">RFS Number: *</label>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">Control No.: *</label>
                   <input
                     type="text"
                     required
@@ -630,23 +614,6 @@ const handleExportExcel = async () => {
                     placeholder="YYYY-MM-###"
                   />
                   {errors.rfsNumber && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.rfsNumber}</p>}
-                </div>
-
-                {/* Control Number */}
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">Control Number: *</label>
-                  <input
-                    type="text"
-                    required
-                    disabled={!isEditMode}
-                    placeholder="Enter dept control number"
-                    className={`w-full text-sm p-2 border rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson ${
-                      errors.controlNumber ? "border-rose-500 bg-rose-50/20" : "border-gray-200"
-                    }`}
-                    value={controlNumber}
-                    onChange={(e) => setControlNumber(e.target.value)}
-                  />
-                  {errors.controlNumber && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.controlNumber}</p>}
                 </div>
 
                 {/* Purchase Order Number */}
@@ -695,33 +662,17 @@ const handleExportExcel = async () => {
 
                 {/* Mode of Request */}
                 <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">Mode of Request:</label>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">Mode of Request: *</label>
                   <select
                     disabled={!isEditMode}
                     className="w-full text-sm p-2 border border-gray-200 rounded-lg bg-white outline-none focus:ring-1 focus:ring-smei-crimson"
                     value={modeOfRequest}
                     onChange={(e: any) => setModeOfRequest(e.target.value)}
                   >
-                    <option value="Regular">Regular</option>
-                    <option value="Emergency">Emergency</option>
-                    <option value="Urgent">Urgent</option>
-                    <option value="Irregular">Irregular</option>
-                  </select>
-                </div>
-
-                {/* Status */}
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">Supply Delivery Status:</label>
-                  <select
-                    disabled={!isEditMode}
-                    className="w-full text-sm p-2 border border-gray-200 rounded-lg bg-white outline-none focus:ring-1 focus:ring-smei-crimson"
-                    value={status}
-                    onChange={(e: any) => setStatus(e.target.value)}
-                  >
-                    <option value="Incomplete">Incomplete</option>
-                    <option value="Complete">Complete</option>
-                    <option value="On Time">On Time</option>
-                    <option value="Late">Late</option>
+                    <option value="Regular">REGULAR/ROUTINE (5-7 days)</option>
+                    <option value="Emergency">EMERGENCY (1-2 days)</option>
+                    <option value="Urgent">URGENT (4-5 days)</option>
+                    <option value="Irregular">IRREGULAR (7-10 days)</option>
                   </select>
                 </div>
 
@@ -739,22 +690,6 @@ const handleExportExcel = async () => {
                     onChange={(e) => setDateRequested(e.target.value)}
                   />
                   {errors.dateRequested && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.dateRequested}</p>}
-                </div>
-
-                {/* Due Date */}
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">Due Date: *</label>
-                  <input
-                    type="date"
-                    required
-                    disabled={!isEditMode}
-                    className={`w-full text-sm p-2 border rounded-lg focus:ring-1 focus:ring-smei-crimson outline-none ${
-                      errors.dueDate ? "border-rose-500 bg-rose-50/20" : "border-gray-200"
-                    }`}
-                    value={dueDate}
-                    onChange={(e) => setDueDate(e.target.value)}
-                  />
-                  {errors.dueDate && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.dueDate}</p>}
                 </div>
 
                 {/* Purpose - Full width row */}

@@ -25,7 +25,7 @@ export interface UserDB {
   email: string;
   role: string;
   department: string;
-  status: "Active" | "Disabled" | "Locked";
+  status: "Active" | "Disabled" | "Locked" | "Pending";
   avatarUrl?: string;
   loginAttempts?: number;
   profile_image?: string;
@@ -117,6 +117,8 @@ export interface PurchaseOrderDB {
   checkedByTitle?: string;
   verifiedBy?: string;
   verifiedByTitle?: string;
+  verifiedBy2?: string;
+  verifiedBy2Title?: string;
   approvedBy?: string;
   approvedByTitle?: string;
   conforme?: string;

@@ -20,6 +20,11 @@ export default function RoleManagement() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
+  // Role Creation states
+  const [isAddingRole, setIsAddingRole] = useState(false);
+  const [newRoleName, setNewRoleName] = useState("");
+  const [isCreatingRole, setIsCreatingRole] = useState(false);
+
   const AVAILABLE_PERMISSIONS = [
     { key: "view_dashboard", label: "View Dashboard", desc: "Access the role-customized KPI summary counters" },
     { key: "view_all_pos", label: "View All POs", desc: "View all purchase orders in the entire system" },
@@ -36,7 +41,8 @@ export default function RoleManagement() {
     { key: "import_excel", label: "Import Excel", desc: "Upload batch contracts from spreadsheets" },
     { key: "export_excel", label: "Export Excel/PDF", desc: "Download validated compliance files" },
     { key: "manage_users", label: "Manage Accounts", desc: "Full administrative CRUD on employee users" },
-    { key: "manage_roles", label: "Manage Roles", desc: "Modify fine-grained RBAC permission matrix" }
+    { key: "manage_roles", label: "Manage Roles", desc: "Modify fine-grained RBAC permission matrix" },
+    { key: "approve_rfs", label: "Approve RFS", desc: "Access the RFS Approval queue to authorize Supply Delivery Status & Due Date" }
   ];
 
   const fetchRoles = async () => {
@@ -55,6 +61,26 @@ export default function RoleManagement() {
   useEffect(() => {
     fetchRoles();
   }, []);
+
+  const handleCreateRole = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newRoleName.trim()) return;
+    setError("");
+    setSuccess("");
+    setIsCreatingRole(true);
+    try {
+      // @ts-ignore
+      await api.createRole(newRoleName.trim(), []);
+      setSuccess(`New role "${newRoleName.trim()}" created successfully!`);
+      setNewRoleName("");
+      setIsAddingRole(false);
+      fetchRoles();
+    } catch (err: any) {
+      setError(err.message || "Failed to create new role");
+    } finally {
+      setIsCreatingRole(false);
+    }
+  };
 
   const handlePermissionToggle = (roleId: string, permissionKey: string) => {
     setRoles((prev) =>
@@ -102,14 +128,84 @@ export default function RoleManagement() {
             Configure fine-grained system permissions and security profiles across corporate levels.
           </p>
         </div>
-        <button
-          onClick={fetchRoles}
-          className="p-2.5 border border-gray-200 text-gray-600 rounded-xl hover:bg-gray-50 active:scale-[0.98] transition-all flex items-center gap-2 text-sm font-semibold"
-        >
-          <RefreshCw className="w-4 h-4" />
-          <span>Refresh Matrix</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setIsAddingRole(true)}
+            className="px-4 py-2.5 bg-gradient-to-r from-red-700 to-red-600 hover:from-red-800 hover:to-red-700 text-white rounded-xl shadow-md font-semibold text-sm transition-all active:scale-[0.98] flex items-center gap-2"
+          >
+            <span>+ Create New Role</span>
+          </button>
+          <button
+            onClick={fetchRoles}
+            className="p-2.5 border border-gray-200 text-gray-600 rounded-xl hover:bg-gray-50 active:scale-[0.98] transition-all flex items-center gap-2 text-sm font-semibold"
+          >
+            <RefreshCw className="w-4 h-4" />
+            <span>Refresh Matrix</span>
+          </button>
+        </div>
       </div>
+
+      {/* Create Role Modal */}
+      {isAddingRole && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-xl border border-gray-100 max-w-md w-full overflow-hidden animate-scaleIn">
+            <div className="p-6 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+              <h3 className="font-bold text-gray-800 font-display text-base tracking-wide uppercase">
+                Create New Role
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsAddingRole(false);
+                  setNewRoleName("");
+                }}
+                className="text-gray-400 hover:text-gray-600 font-bold transition-all text-sm px-2 py-1"
+              >
+                ✕
+              </button>
+            </div>
+            <form onSubmit={handleCreateRole}>
+              <div className="p-6 space-y-4">
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider">
+                    Role Name
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newRoleName}
+                    onChange={(e) => setNewRoleName(e.target.value)}
+                    placeholder="e.g. Impex/Purchasing Staff"
+                    className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 text-sm font-semibold"
+                  />
+                </div>
+              </div>
+              <div className="p-6 border-t border-gray-100 bg-gray-50 flex items-center justify-end gap-3 text-xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsAddingRole(false);
+                    setNewRoleName("");
+                  }}
+                  className="px-4 py-2 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-100 transition-all font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isCreatingRole}
+                  className="px-4 py-2 bg-gradient-to-r from-red-700 to-red-600 hover:from-red-800 hover:to-red-700 text-white rounded-lg shadow font-semibold flex items-center gap-2"
+                >
+                  {isCreatingRole ? (
+                    <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : null}
+                  <span>Save Role</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Messaging */}
       {error && (
@@ -147,18 +243,38 @@ export default function RoleManagement() {
                   )}
                 </div>
                 {role.name !== "Administrator" && (
-                  <button
-                    onClick={() => saveRolePermissions(role)}
-                    disabled={isSaving === role.id}
-                    className="bg-gradient-to-r from-smei-darkred to-smei-crimson text-white font-semibold py-2 px-3.5 rounded-xl shadow-lg shadow-red-900/10 hover:shadow-red-900/20 active:scale-[0.98] transition-all flex items-center gap-2 text-xs"
-                  >
-                    {isSaving === role.id ? (
-                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    ) : (
-                      <Save className="w-4 h-4" />
-                    )}
-                    <span>Apply Privilege Updates</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => saveRolePermissions(role)}
+                      disabled={isSaving === role.id}
+                      className="bg-gradient-to-r from-smei-darkred to-smei-crimson text-white font-semibold py-2 px-3.5 rounded-xl shadow-lg shadow-red-900/10 hover:shadow-red-900/20 active:scale-[0.98] transition-all flex items-center gap-2 text-xs"
+                    >
+                      {isSaving === role.id ? (
+                        <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      ) : (
+                        <Save className="w-4 h-4" />
+                      )}
+                      <span>Apply Privilege Updates</span>
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (confirm("Are you sure you want to delete this role?")) {
+                          try {
+                            await api.deleteRole(role.id);
+                            setRoles(roles.filter(r => r.id !== role.id));
+                            setSuccess("Role deleted successfully");
+                            setTimeout(() => setSuccess(""), 3000);
+                          } catch (err: any) {
+                            setError(err.message || "Failed to delete role");
+                            setTimeout(() => setError(""), 5000);
+                          }
+                        }
+                      }}
+                      className="bg-red-50 text-red-600 hover:bg-red-100 font-semibold py-2 px-3.5 rounded-xl transition-all flex items-center gap-2 text-xs"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 )}
               </div>
 

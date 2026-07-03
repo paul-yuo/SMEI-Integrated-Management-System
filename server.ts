@@ -15,6 +15,7 @@ const PORT = 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "smei-enterprise-secret-key-2026-secure-token";
 
 app.use(express.json({ limit: "50mb" }));
+app.use(express.static(path.join(process.cwd(), "public")));
 
 // Helper to log audit trails
 function logAudit(
@@ -170,6 +171,10 @@ app.post("/api/auth/login", (req, res) => {
     return res.status(403).json({ error: "Your account has been disabled. Please contact your Administrator." });
   }
 
+  if (user.status === "Pending") {
+    return res.status(403).json({ error: "Your account is pending administrator approval." });
+  }
+
   if (user.status === "Locked") {
     return res.status(403).json({ error: "Your account is locked due to too many failed attempts." });
   }
@@ -244,6 +249,39 @@ app.get("/api/auth/invitation/:token", (req, res) => {
 });
 
 // Complete secure registration
+app.post("/api/auth/register-public", (req, res) => {
+  const { username, password, fullName, department } = req.body;
+  if (!username || !password || !fullName || !department) {
+    return res.status(400).json({ error: "All registration fields are required." });
+  }
+
+  if (password.length < 6) {
+    return res.status(400).json({ error: "Password must be at least 6 characters long." });
+  }
+
+  const dup = db.getUsers().find((u) => u.username.toLowerCase() === username.toLowerCase());
+  if (dup) {
+    return res.status(400).json({ error: "Username is already taken." });
+  }
+
+  const userId = `u_${Date.now()}`;
+  const newUser: UserDB = {
+    id: userId,
+    username,
+    passwordHash: hashPassword(password),
+    fullName,
+    email: `${username}@smei-enterprise.com`,
+    role: "Viewer", // Default role, Admin can change later
+    department,
+    status: "Pending" // Awaiting admin approval
+  };
+
+  db.saveUser(newUser);
+  logAudit(userId, username, "Viewer", "User Registered", "Auth", userId, "-", "New account created via public registration (Pending Approval)", req);
+
+  res.status(201).json({ message: "Registration successful. Please wait for an administrator to approve your account." });
+});
+
 app.post("/api/auth/register", (req, res) => {
   const { token, username, password, fullName } = req.body;
   if (!token || !username || !password || !fullName) {
@@ -614,6 +652,29 @@ app.get("/api/roles", authenticateToken, requireAdmin, (req, res) => {
   res.json(db.getRoles());
 });
 
+app.post("/api/roles", authenticateToken, requireAdmin, (req: AuthRequest, res) => {
+  const { name, permissions } = req.body;
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: "Role name is required" });
+  }
+
+  const trimmedName = name.trim();
+  const existing = db.getRoles().find(r => r.name.toLowerCase() === trimmedName.toLowerCase());
+  if (existing) {
+    return res.status(400).json({ error: `Role '${trimmedName}' already exists.` });
+  }
+
+  const newRole = {
+    id: `role_${Date.now()}`,
+    name: trimmedName,
+    permissions: permissions || []
+  };
+
+  db.saveRole(newRole);
+  logAudit(req.user!.id, req.user!.username, req.user!.role, "Create Role", "Roles", newRole.id, "-", newRole.name, req);
+  res.status(201).json(newRole);
+});
+
 app.put("/api/roles/:id", authenticateToken, requireAdmin, (req: AuthRequest, res) => {
   const { permissions } = req.body;
   const roleId = req.params.id;
@@ -621,6 +682,30 @@ app.put("/api/roles/:id", authenticateToken, requireAdmin, (req: AuthRequest, re
   const role = db.getRoles().find((r) => r.id === roleId);
   if (!role) {
     return res.status(404).json({ error: "Role not found" });
+
+app.delete("/api/roles/:id", authenticateToken, requireAdmin, (req: AuthRequest, res) => {
+  const { id } = req.params;
+  const roles = db.getRoles();
+  const index = roles.findIndex((r) => r.id === id);
+  if (index === -1) {
+    return res.status(404).json({ error: "Role not found" });
+  }
+  
+  if (roles[index].name === "Administrator") {
+    return res.status(400).json({ error: "Cannot delete the Administrator role" });
+  }
+  
+  const roleName = roles[index].name;
+  roles.splice(index, 1);
+  db.saveRoles(roles);
+  
+  if (req.user) {
+    logAudit(req.user.id, req.user.username, req.user.role, "Delete Role", "Roles", id, roleName, "-", req);
+  }
+  
+  res.json({ success: true });
+});
+
   }
 
   const oldVal = role.permissions.join(", ");
@@ -647,8 +732,8 @@ app.post("/api/suppliers", authenticateToken, (req: AuthRequest, res) => {
     return res.status(403).json({ error: "Access Denied: You do not have permission to create suppliers." });
   }
   const { name, attention, phone, fax, address, category } = req.body;
-  if (!name || !attention || !address || !category) {
-    return res.status(400).json({ error: "Supplier Name, Attention, Address and Category are required" });
+  if (!name || !attention || !category) {
+    return res.status(400).json({ error: "Supplier Name, Attention and Category are required" });
   }
 
   const trimmedName = name.trim();
@@ -665,7 +750,7 @@ app.post("/api/suppliers", authenticateToken, (req: AuthRequest, res) => {
     attention,
     phone: phone || "",
     fax: fax || "",
-    address,
+    address: address || "",
     category,
     status: "Active" as const,
     createdAt: new Date().toISOString().split("T")[0],
@@ -1305,22 +1390,18 @@ function getNextRFSNumber(): string {
 }
 
 function getNextCanvassNumber(): string {
-  const yearStr = new Date().getFullYear().toString().slice(-2);
-  const prefix = `CANVASS-${yearStr}-`;
   const records = db.getCanvassSheets();
   let maxSeq = 0;
   for (const r of records) {
-    if (r.canvassNumber && r.canvassNumber.startsWith(prefix)) {
-      const parts = r.canvassNumber.split("-");
-      const seqStr = parts[parts.length - 1];
-      const seq = parseInt(seqStr, 10);
+    if (r.canvassNumber) {
+      const seq = parseInt(r.canvassNumber, 10);
       if (!isNaN(seq) && seq > maxSeq) {
         maxSeq = seq;
       }
     }
   }
   const nextSeq = maxSeq + 1;
-  return `${prefix}${nextSeq.toString().padStart(3, "0")}`;
+  return nextSeq.toString().padStart(5, "0");
 }
 
 // 1. PAYMENT INSTRUCTION SLIP (PIS) ROUTES
@@ -1505,8 +1586,12 @@ app.post("/api/rfs", authenticateToken, (req: AuthRequest, res) => {
 
 app.put("/api/rfs/:id", authenticateToken, (req: AuthRequest, res) => {
   const user = req.user!;
-  if (user.role !== "Administrator" && user.role !== "Purchasing Staff") {
-    return res.status(403).json({ error: "Access Denied: Only Purchasing Staff or Admin can edit Requests for Supply." });
+  const roles = db.getRoles();
+  const userRole = roles.find(r => r.name === user.role);
+  const hasApproveRfs = userRole?.permissions.includes("approve_rfs");
+
+  if (user.role !== "Administrator" && user.role !== "Purchasing Staff" && !hasApproveRfs) {
+    return res.status(403).json({ error: "Access Denied: Only Purchasing Staff, Admin, or users with RFS Approval permission can edit/approve Requests for Supply." });
   }
 
   const existing = db.getRequestsForSupply().find(r => r.id === req.params.id);
@@ -1593,10 +1678,10 @@ app.post("/api/canvass", authenticateToken, (req: AuthRequest, res) => {
     data.canvassNumber = getNextCanvassNumber();
   }
 
-  // Validate format CANVASS-YY-###
-  const canvFormat = /^CANVASS-\d{2}-\d{3}$/;
+  // Validate format 00001
+  const canvFormat = /^\d{5}$/;
   if (!canvFormat.test(data.canvassNumber)) {
-    return res.status(400).json({ error: "Invalid Canvass Number format. Expected: CANVASS-YY-### (e.g. CANVASS-26-001)" });
+    return res.status(400).json({ error: "Invalid Canvass Number format. Expected: 5-digit sequential number (e.g. 00001)" });
   }
 
   // Check duplicate
@@ -1645,9 +1730,9 @@ app.put("/api/canvass/:id", authenticateToken, (req: AuthRequest, res) => {
   const data = req.body;
   if (data.canvassNumber && data.canvassNumber.toUpperCase() !== existing.canvassNumber.toUpperCase()) {
     // Validate format
-    const canvFormat = /^CANVASS-\d{2}-\d{3}$/;
+    const canvFormat = /^\d{5}$/;
     if (!canvFormat.test(data.canvassNumber)) {
-      return res.status(400).json({ error: "Invalid Canvass Number format. Expected: CANVASS-YY-###" });
+      return res.status(400).json({ error: "Invalid Canvass Number format. Expected: 5-digit sequential number (e.g. 00001)" });
     }
     // Check duplicate
     const duplicate = db.getCanvassSheets().find(c => c.id !== req.params.id && c.canvassNumber.toUpperCase() === data.canvassNumber.toUpperCase());
