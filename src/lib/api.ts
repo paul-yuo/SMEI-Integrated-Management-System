@@ -133,6 +133,12 @@ export const api = {
     });
   },
 
+  async deleteRole(id: string): Promise<{ success: boolean }> {
+    return apiFetch<{ success: boolean }>(`/api/roles/${id}`, {
+      method: "DELETE"
+    });
+  },
+
   // Departments
   async getDepartments(): Promise<Array<{ id: string; name: string }>> {
     return apiFetch<Array<{ id: string; name: string }>>("/api/departments");

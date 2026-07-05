@@ -383,6 +383,8 @@ export default function App() {
       setCurrentTab("pis");
     } else if (menuKey === "rfs") {
       setCurrentTab("rfs");
+    } else if (menuKey === "rfs-approval") {
+      setCurrentTab("rfs-approval");
     } else if (menuKey === "canvass") {
       setCurrentTab("canvass");
     } else if (menuKey === "suppliers") {
@@ -438,6 +440,8 @@ export default function App() {
         return <Package className="w-5 h-5 transition-transform duration-300" />;
       case "canvass":
         return <GitCompare className="w-5 h-5 transition-transform duration-300" />;
+      case "check":
+        return <UserCheck className="w-5 h-5 transition-transform duration-300" />;
       case "users":
         return <Building2 className="w-5 h-5 transition-transform duration-300" />;
       case "user-management":
@@ -463,6 +467,7 @@ export default function App() {
     if (menuKey === "dashboard") return currentTab === "dashboard";
     if (menuKey === "pis") return currentTab === "pis";
     if (menuKey === "rfs") return currentTab === "rfs";
+    if (menuKey === "rfs-approval") return currentTab === "rfs-approval";
     if (menuKey === "canvass") return currentTab === "canvass";
     if (menuKey === "suppliers") return currentTab === "suppliers";
     if (menuKey === "supplier-report") return currentTab === "supplier-report";
@@ -913,7 +918,7 @@ export default function App() {
         </footer>
 
         {greetingMessage && (
-        <div className="fixed top-4 right-4 z-[9999] bg-white dark:bg-gray-800 text-smei-crimson dark:text-red-400 px-6 py-4 rounded-xl shadow-2xl border-l-4 border-smei-crimson animate-slide-in-right flex items-center gap-3">
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] bg-white dark:bg-gray-800 text-smei-crimson dark:text-red-400 px-6 py-4 rounded-xl shadow-2xl border-l-4 border-smei-crimson animate-fade-in flex items-center gap-3">
           <span className="text-2xl">👋</span>
           <p className="font-bold font-display">{greetingMessage}</p>
         </div>

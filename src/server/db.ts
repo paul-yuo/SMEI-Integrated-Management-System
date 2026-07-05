@@ -766,6 +766,16 @@ class Database {
     this.save();
   }
 
+  public saveRoles(roles: RoleDB[]) {
+    this.data.roles = roles;
+    this.save();
+  }
+
+  public deleteRole(id: string) {
+    this.data.roles = this.data.roles.filter((r) => r.id !== id);
+    this.save();
+  }
+
   public getDepartments(): DepartmentDB[] {
     return this.data.departments;
   }

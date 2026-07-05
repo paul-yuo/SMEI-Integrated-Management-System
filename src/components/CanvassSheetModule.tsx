@@ -667,8 +667,12 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
             />
           </div>
 
-          <div className="flex items-center gap-2.5 w-full md:w-auto justify-end">
-            <ExportWordButton onClick={handleExportWord} />
+          <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto justify-end">
+            <ExportWordButton
+              onClick={handleExportWord}
+              disabled={!activeSheetId}
+              selectedText={sheets.find((s) => s.id === activeSheetId)?.canvassNumber || ""}
+            />
             {isAuthorized && <CreateButton onClick={() => handleOpenModal(null)} label="Create Canvass Sheet" />}
           </div>
         </div>

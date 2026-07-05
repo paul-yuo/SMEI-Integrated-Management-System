@@ -437,7 +437,11 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
           </div>
 
           <div className="flex items-center justify-end gap-2 w-full md:w-auto ml-auto">
-            <ExportExcelButton onClick={handleExportExcel} />
+            <ExportExcelButton
+              onClick={handleExportExcel}
+              disabled={!activeSlipId}
+              selectedText={slips.find((s) => s.id === activeSlipId)?.pisNumber || ""}
+            />
             {isAuthorized && (
               <CreateButton onClick={() => handleOpenModal(null)} label="Create PIS" />
             )}

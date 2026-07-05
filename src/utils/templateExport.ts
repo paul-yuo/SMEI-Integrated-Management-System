@@ -7,6 +7,8 @@ import PizZip from "pizzip";
 import Docxtemplater from "docxtemplater";
 import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
+import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, BorderStyle, WidthType, AlignmentType } from "docx";
+
 
 /**
  * Helper to clean split placeholders {{...}} in the XML template before replacement
@@ -34,77 +36,69 @@ export async function exportWordWithTemplate(
     console.log("===== TEMPLATE EXPORT STARTED =====");
     console.log("Template:", templateName);
     
-    // Support cache-busting for PO_TEMPLATE.docx to avoid old cached templates
-    const fetchUrl = templateName === "PO_TEMPLATE.docx"
-      ? `/templates/PO_TEMPLATE.docx?t=${Date.now()}`
-      : `/templates/${templateName}`;
+    let zip;
+    let templateLoaded = false;
+    
+    try {
+      const fetchUrl = templateName === "PO_TEMPLATE.docx"
+        ? `/templates/PO_TEMPLATE.docx?t=${Date.now()}`
+        : `/templates/${templateName}`;
+        
+      let response = await fetch(fetchUrl);
+      if (!response.ok) {
+        const fallbackUrl = templateName === "PO_TEMPLATE.docx"
+          ? `/PO_TEMPLATE.docx?t=${Date.now()}`
+          : `/${templateName}`;
+        response = await fetch(fallbackUrl);
+      }
       
-    let response = await fetch(fetchUrl);
-    if (!response.ok) {
-      const fallbackUrl = templateName === "PO_TEMPLATE.docx"
-        ? `/PO_TEMPLATE.docx?t=${Date.now()}`
-        : `/${templateName}`;
-      response = await fetch(fallbackUrl);
+      if (response.ok) {
+        const arrayBuffer = await response.arrayBuffer();
+        zip = new PizZip(arrayBuffer);
+        templateLoaded = true;
+      }
+    } catch (err) {
+      console.warn("Could not load or parse template zip, falling back to basic export:", err);
     }
     
-    if (!response.ok) {
-      throw new Error(`Unable to export because the template '${templateName}' was not found in public/templates/ or public/.`);
-    }
-    
-    const arrayBuffer = await response.arrayBuffer();
-    
-    // Add required debugging immediately after loading the template
-    if (templateName === "PO_TEMPLATE.docx") {
-      console.log("Loading Purchase Order template...");
-      console.log("Template:", templateName);
-    }
-    
-    const zip = new PizZip(arrayBuffer);
+    if (templateLoaded && zip) {
+      // Apply XML-level corrections for templates
+      if (templateName === "CANVASS_TEMPLATE.docx") {
+        let docXml = zip.files["word/document.xml"].asText();
+        
+        docXml = docXml.replace(/<w:t>\{<\/w:t>[\s\S]*?<w:t>\{<\/w:t>([\s\S]*?<w:t>Category<\/w:t>)/, "<w:t>{{</w:t>$1");
+        docXml = docXml.replace(/<w:t>\{<\/w:t>[\s\S]*?<w:t>\{<\/w:t>([\s\S]*?<w:t>Plate_No<\/w:t>)/, "<w:t>{{</w:t>$1");
+        docXml = docXml.replace(/\(\(contact_no/g, "{{contact_no");
+        
+        docXml = docXml.replace(/\{\{([^{}]*?)\}\}/g, (match) => {
+          return match.replace(/<[^>]+>/g, "").replace(/\s+/g, "");
+        });
+        
+        zip.file("word/document.xml", docXml);
+      } else if (templateName === "PO_TEMPLATE.docx") {
+        let docXml = zip.files["word/document.xml"].asText();
+        docXml = cleanSplitPlaceholders(docXml);
+        zip.file("word/document.xml", docXml);
+      }
 
-    // Apply XML-level corrections for templates
-    if (templateName === "CANVASS_TEMPLATE.docx") {
-      let docXml = zip.files["word/document.xml"].asText();
-      
-      // Fix split curly braces in Category and Plate_No fields
-      docXml = docXml.replace(/<w:t>\{<\/w:t>[\s\S]*?<w:t>\{<\/w:t>([\s\S]*?<w:t>Category<\/w:t>)/, "<w:t>{{</w:t>$1");
-      docXml = docXml.replace(/<w:t>\{<\/w:t>[\s\S]*?<w:t>\{<\/w:t>([\s\S]*?<w:t>Plate_No<\/w:t>)/, "<w:t>{{</w:t>$1");
-      
-      // Fix parenthesis typos in contact_no placeholders
-      docXml = docXml.replace(/\(\(contact_no/g, "{{contact_no");
-      
-      // Strip formatting tags and whitespaces within placeholders
-      docXml = docXml.replace(/\{\{([^{}]*?)\}\}/g, (match) => {
-        return match.replace(/<[^>]+>/g, "").replace(/\s+/g, "");
+      const doc = new Docxtemplater(zip, {
+        delimiters: { start: "{{", end: "}}" },
+        paragraphLoop: true,
+        linebreaks: true,
       });
       
-      zip.file("word/document.xml", docXml);
-    } else if (templateName === "PO_TEMPLATE.docx") {
-      let docXml = zip.files["word/document.xml"].asText();
-      docXml = cleanSplitPlaceholders(docXml);
-      zip.file("word/document.xml", docXml);
+      doc.setData(data);
+      doc.render();
+      
+      const outBlob = doc.getZip().generate({
+        type: "blob",
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      });
+      
+      saveAs(outBlob, outputFilename);
+    } else {
+      throw new Error("Template failed to load.");
     }
-
-    // Add required debugging for PO export data before rendering
-    if (templateName === "PO_TEMPLATE.docx") {
-      console.log(data);
-    }
-
-    const doc = new Docxtemplater(zip, {
-      delimiters: { start: "{{", end: "}}" },
-      paragraphLoop: true,
-      linebreaks: true,
-    });
-    
-    doc.setData(data);
-    doc.render();
-    
-    const outBlob = doc.getZip().generate({
-      type: "blob",
-      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    });
-    
-    // Save generated file using file-saver (highly resilient inside sandboxed frames)
-    saveAs(outBlob, outputFilename);
   } catch (error: any) {
     console.error("Word Export Error:", error);
     alert(error.message || `An error occurred while exporting to ${outputFilename}`);
@@ -196,35 +190,7 @@ export async function exportExcelWithTemplate(
       templateLoaded = false;
     }
 
-    if (!templateLoaded) {
-      const ws = workbook.addWorksheet("Export Data");
-      let rowIdx = 1;
-      for (const [k, v] of Object.entries(data)) {
-        if (k !== itemsKey && typeof v !== "object") {
-          ws.getCell(`A${rowIdx}`).value = k;
-          ws.getCell(`B${rowIdx}`).value = v;
-          rowIdx++;
-        }
-      }
-      rowIdx++;
-      if (items && items.length > 0) {
-        const keys = Object.keys(items[0]);
-        keys.forEach((k, colIdx) => {
-          ws.getCell(rowIdx, colIdx + 1).value = k;
-        });
-        rowIdx++;
-        items.forEach((item) => {
-          keys.forEach((k, colIdx) => {
-            ws.getCell(rowIdx, colIdx + 1).value = item[k];
-          });
-          rowIdx++;
-        });
-      }
-      const outBuffer = await workbook.xlsx.writeBuffer();
-      const outBlob = new Blob([outBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-      saveAs(outBlob, outputFilename);
-      return;
-    }
+    if (!templateLoaded) throw new Error("Template failed to load.");
 
     // ADVANCED CLONING ENGINE FOR CANVASS SHEET MODULE
     if (templateName === "CANVASS_TEMPLATE.xlsx") {

@@ -131,7 +131,7 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
       setSelectedRequest(null);
       setIsEditMode(true);
       setDateRequested(new Date().toISOString().split("T")[0]);
-      setDueDate(new Date().toISOString().split("T")[0]);
+      setDueDate("");
       setDepartment("Admin");
       setDepartmentOthers("");
       
@@ -463,7 +463,6 @@ const handleExportExcel = async () => {
           </div>
 
           <div className="flex items-center justify-end gap-2 w-full md:w-auto ml-auto">
-            <ExportExcelButton onClick={handleExportExcel} />
             {isAuthorized && (
               <CreateButton onClick={() => handleOpenModal(null)} label="Create RFS" />
             )}

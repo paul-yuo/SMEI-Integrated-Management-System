@@ -245,6 +245,9 @@ export default function POForm({
       setZeroRatedAmount(po.zeroRatedAmount);
       setPartsEwt1(po.partsEwt1);
       setLaborEwt2(po.laborEwt2);
+      
+      setPartsEwtRate(po.partsEwt1 > 0 ? 0.01 : 0);
+      setLaborEwtRate(po.laborEwt2 > 0 ? 0.02 : 0);
       setTotalAmount(po.totalAmount);
 
       setPaymentTerms(po.paymentTerms);

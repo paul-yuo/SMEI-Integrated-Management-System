@@ -9,6 +9,7 @@ import { Search, Plus, Filter, Calendar, FileText, ArrowUpDown, Trash2, Edit3, E
 import { ExcelTemplateDownloadButton, exportPOToExcel } from "./ExcelIO";
 import { exportPOToWord } from "../utils/wordExport";
 import { TableSkeleton } from "./ui/Skeleton";
+import { ExportWordButton } from "./SharedButtons";
 
 interface POListProps {
   pos: PurchaseOrder[];
@@ -231,33 +232,12 @@ export default function POList({
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {/* Individual PO Word Export Selector & Button */}
-          {pos.length > 0 && (
-            <div className="flex items-center gap-2 bg-white border border-gray-200 p-1.5 rounded-xl shadow-sm">
-              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider pl-1.5 hidden sm:inline">Active:</span>
-              <select
-                value={selectedPOId || ""}
-                onChange={(e) => setSelectedPOId(e.target.value)}
-                className="bg-transparent text-xs font-mono font-bold text-gray-700 focus:outline-none px-1.5 py-1 max-w-[140px] truncate border-r border-gray-100 mr-1"
-                title="Select a purchase order to export to Word"
-              >
-                {filteredPOs.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.poNumber}
-                  </option>
-                ))}
-              </select>
-              <button
-                onClick={handleExportAll}
-                disabled={isExporting}
-                className="inline-flex items-center gap-1.5 bg-[#2B579A] hover:bg-[#1C3A6A] text-white font-semibold text-xs py-1.5 px-3 rounded-lg transition-all disabled:opacity-50"
-                title="Export selected PO to Word (.docx)"
-              >
-                <FileText className="w-3.5 h-3.5" />
-                <span>{isExporting ? "Generating..." : "Export Word File"}</span>
-              </button>
-            </div>
-          )}
+          <ExportWordButton
+            onClick={handleExportAll}
+            disabled={!selectedPOId || isExporting}
+            selectedText={pos.find((p) => p.id === selectedPOId)?.poNumber || ""}
+            label={isExporting ? "Generating..." : "Export Word"}
+          />
 
           {!isViewer && (
             <button

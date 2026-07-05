@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { RequestForSupply, User, UserRole } from "../types";
 import { api } from "../lib/api";
-import { Search, Filter, Edit3, Eye, X } from "lucide-react";
+import { Search, Filter, Edit3, Eye, X, FileSpreadsheet } from "lucide-react";
 import { TableSkeleton } from "./ui/Skeleton";
+import { exportWordWithTemplate, exportExcelWithTemplate } from "../utils/templateExport";
+import { ExportExcelButton } from "./SharedButtons";
 
 interface RfsApprovalModuleProps {
   currentUser: User;
@@ -90,6 +92,49 @@ export default function RfsApprovalModule({ currentUser }: RfsApprovalModuleProp
     }
   };
 
+  const handleExport = async (req: RequestForSupply, format: "word" | "excel") => {
+    try {
+      const exportData = {
+        RFS_NO: req.rfsNumber,
+        REQUEST_DATE: req.dateRequested,
+        DUE_DATE: req.dueDate || "",
+        RECEIVED_DATE: req.dueDate || "", // Map to template placeholder
+        DEPARTMENT: req.department === "Others" ? req.departmentOthers : req.department,
+        CONTROL_NO: req.rfsNumber,
+        PO_NO: req.purchaseOrderNumber || "N/A",
+        STATUS: req.status,
+        MODE: req.modeOfRequest,
+        PURPOSE: req.purpose,
+        REQUESTED_BY: req.requestedBy,
+        VERIFIED_BY: req.verifiedBy || "N/A",
+        APPROVED_BY: req.approvedBy || "N/A",
+      };
+
+      const exportItems = (req.items || []).map((it, index) => ({
+        index: index + 1,
+        quantity: it.quantity,
+        unit: it.unit,
+        description: it.description,
+        lastPurchaseDate: it.lastPurchaseDate || "N/A",
+        lastPurchaseQuantity: it.lastPurchaseQuantity || 0,
+        lastPurchaseUnitPrice: it.lastPurchaseUnitPrice || 0,
+        currentPurchaseDate: it.currentPurchaseDate || "N/A",
+        currentPurchaseQuantity: it.currentPurchaseQuantity || 0,
+        currentPurchaseUnitPrice: it.currentPurchaseUnitPrice || 0,
+        remarks: it.remarks || "N/A",
+      }));
+
+      if (format === "word") {
+        await exportWordWithTemplate("RFS_TEMPLATE.docx", { ...exportData, items: exportItems }, `${req.rfsNumber}_SMEI_RFS.docx`);
+      } else {
+        await exportExcelWithTemplate("RFS_TEMPLATE.xlsx", exportData, "items", exportItems, `${req.rfsNumber}_SMEI_RFS.xlsx`);
+      }
+    } catch (err: any) {
+      console.error("Export error:", err);
+      alert("Failed to export RFS. Make sure templates are placed in public/templates/ directory.");
+    }
+  };
+
   const statusColors: Record<string, string> = {
     Complete: "bg-green-50 text-green-700 border-green-300",
     Incomplete: "bg-gray-100 text-gray-700 border-gray-300",
@@ -105,17 +150,30 @@ export default function RfsApprovalModule({ currentUser }: RfsApprovalModuleProp
   };
 
   return (
-    <div className="space-y-6">
+    <div className="p-6 md:p-10 space-y-6 max-w-7xl mx-auto overflow-x-hidden">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-gray-800 font-display tracking-wide uppercase flex items-center gap-2">
+          <h2 className="text-2xl font-bold text-gray-800 tracking-tight font-display uppercase flex items-center gap-2">
             RFS Approval
           </h2>
-          <p className="text-sm text-gray-500">Manage Supply Delivery Status and Due Dates for RFS</p>
+          <p className="text-sm text-gray-500 mt-0.5">Manage Supply Delivery Status and Due Dates for RFS</p>
         </div>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        {/* Excel Export Action Bar */}
+        <div className="p-4 border-b border-gray-100 bg-gray-50/30 flex flex-col sm:flex-row gap-3 justify-between items-center">
+          <ExportExcelButton
+            onClick={() => {
+              if (selectedRFS) {
+                handleExport(selectedRFS, "excel");
+              }
+            }}
+            disabled={!selectedRFS}
+            selectedText={selectedRFS ? selectedRFS.rfsNumber : ""}
+          />
+        </div>
+
         {/* Filters */}
         <div className="p-4 border-b border-gray-100 bg-gray-50/50 flex flex-col md:flex-row gap-4 justify-between items-center">
           <div className="relative w-full md:w-96">
@@ -147,74 +205,92 @@ export default function RfsApprovalModule({ currentUser }: RfsApprovalModuleProp
           </div>
         </div>
 
-        {loading ? (
-          <div className="p-6">
-            <TableSkeleton rows={5} columns={6} />
-          </div>
-        ) : (
-          <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
-            <table className="w-full text-left border-collapse min-w-[900px]">
-              <thead>
-                <tr className="bg-red-50/20 text-gray-600 border-b border-gray-100 text-[11px] font-bold uppercase tracking-wider sticky top-0 z-10">
-                  <th className="py-4 px-6">Control No.</th>
-                  <th className="py-4 px-6">Department</th>
-                  <th className="py-4 px-6">Mode</th>
-                  <th className="py-4 px-6">Due Date</th>
-                  <th className="py-4 px-6">Status</th>
-                  <th className="py-4 px-6 text-center">Action</th>
+        <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+          <table className="w-full text-left border-collapse min-w-[900px]">
+            <thead>
+              <tr className="bg-red-50/20 text-gray-600 border-b border-gray-100 text-[11px] font-bold uppercase tracking-wider sticky top-0 z-10">
+                <th className="py-4 px-6">Control No.</th>
+                <th className="py-4 px-6">Department</th>
+                <th className="py-4 px-6">Mode</th>
+                <th className="py-4 px-6">Due Date</th>
+                <th className="py-4 px-6">Status</th>
+                <th className="py-4 px-6 text-center">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {loading ? (
+                <TableSkeleton rows={5} columns={6} />
+              ) : paginatedRequests.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-12 text-center text-gray-400">
+                    <div className="flex flex-col items-center justify-center gap-2">
+                      <span className="text-sm">No requests found matching your filters.</span>
+                    </div>
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {paginatedRequests.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="py-12 text-center text-gray-400">
-                      <div className="flex flex-col items-center justify-center gap-2">
-                        <span className="text-sm">No requests found matching your filters.</span>
+              ) : (
+                paginatedRequests.map((req, idx) => (
+                  <tr 
+                    key={req.id} 
+                    onClick={() => setSelectedRFS(req)}
+                    onDoubleClick={() => handleOpenModal(req)}
+                    className={`group transition-all border-b border-gray-100 cursor-pointer ${
+                      selectedRFS?.id === req.id
+                        ? "bg-red-600/10 border-l-4 border-l-smei-crimson font-medium"
+                        : idx % 2 === 1
+                        ? "bg-gray-50/30 hover:bg-red-600/5"
+                        : "bg-white hover:bg-red-600/5"
+                    }`}
+                    title="Click to select for export, Double-click to open details/edit"
+                  >
+                    <td className="py-3 px-6 font-mono font-bold text-smei-darkred">
+                      <div className="flex items-center gap-2">
+                        {selectedRFS?.id === req.id && (
+                          <div className="w-1.5 h-1.5 bg-smei-crimson rounded-full animate-pulse shrink-0" />
+                        )}
+                        <span>{req.rfsNumber}</span>
                       </div>
                     </td>
-                  </tr>
-                ) : (
-                  paginatedRequests.map((req) => (
-                    <tr 
-                      key={req.id} 
-                      className="group transition-colors bg-white hover:bg-red-600/5 cursor-pointer"
-                      onClick={() => handleOpenModal(req)}
-                    >
-                      <td className="py-3 px-6 font-mono font-bold text-smei-darkred">
-                        {req.rfsNumber}
-                      </td>
-                      <td className="py-3 px-6 text-gray-700 font-semibold text-xs">
-                        {req.department === "Others" ? req.departmentOthers : req.department}
-                      </td>
-                      <td className="py-3 px-6">
-                        <span className={`inline-flex px-2 py-0.5 rounded text-[10px] border ${modeColors[req.modeOfRequest] || "bg-gray-100"}`}>
-                          {req.modeOfRequest}
-                        </span>
-                      </td>
-                      <td className="py-3 px-6 text-gray-500 font-mono">
-                        {req.dueDate || <span className="text-gray-300 italic">Not set</span>}
-                      </td>
-                      <td className="py-3 px-6">
-                        <span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-bold border ${statusColors[req.status] || "bg-gray-100"}`}>
-                          {req.status}
-                        </span>
-                      </td>
-                      <td className="py-3 px-6 text-center">
+                    <td className="py-3 px-6 text-gray-700 font-semibold text-xs">
+                      {req.department === "Others" ? req.departmentOthers : req.department}
+                    </td>
+                    <td className="py-3 px-6">
+                      <span className={`inline-flex px-2 py-0.5 rounded text-[10px] border ${modeColors[req.modeOfRequest] || "bg-gray-100"}`}>
+                        {req.modeOfRequest}
+                      </span>
+                    </td>
+                    <td className="py-3 px-6 text-gray-500 font-mono">
+                      {req.dueDate || <span className="text-gray-300 italic">Not set</span>}
+                    </td>
+                    <td className="py-3 px-6">
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-bold border ${statusColors[req.status] || "bg-gray-100"}`}>
+                        {req.status}
+                      </span>
+                    </td>
+                    <td className="py-3 px-6 text-center" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-center gap-1.5">
                         <button
-                          onClick={(e) => { e.stopPropagation(); handleOpenModal(req); }}
+                          onClick={() => handleOpenModal(req)}
                           className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-transparent hover:border-blue-100"
                           title="Update Status & Due Date"
                         >
                           <Edit3 className="w-4 h-4" />
                         </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
+                        <button
+                          onClick={() => handleExport(req, "excel")}
+                          className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors border border-transparent hover:border-emerald-100"
+                          title="Export to Excel"
+                        >
+                          <FileSpreadsheet className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
 
         {/* Pagination Controls */}
         {!loading && totalPages > 1 && (
@@ -292,6 +368,13 @@ export default function RfsApprovalModule({ currentUser }: RfsApprovalModuleProp
               </div>
 
               <div className="pt-4 flex justify-end gap-2 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => handleExport(selectedRFS, "excel")}
+                  className="mr-auto px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-all font-semibold shadow flex items-center gap-1.5 text-xs"
+                >
+                  <FileSpreadsheet className="w-4 h-4" /> Export Excel
+                </button>
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}

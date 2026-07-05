@@ -68,6 +68,18 @@ export default function Header({
         return "Purchase Order Workspace";
       case "suppliers":
         return "Suppliers Directory";
+      case "supplier-report":
+        return "Supplier Summary Report";
+      case "supplier-analytics":
+        return "Supplier Analytics Dashboard";
+      case "pis":
+        return "Payment Instruction Slips";
+      case "rfs":
+        return "Requests For Supply";
+      case "rfs-approval":
+        return "RFS Approval Workspace";
+      case "canvass":
+        return "Canvass Sheets Directory";
       case "users":
         return "User Management";
       case "roles":
@@ -323,6 +335,19 @@ export default function Header({
             >
               Canvass
             </button>
+
+            {(currentUser.role === UserRole.Administrator || currentUser.role === UserRole.PurchasingStaff) && (
+              <button
+                onClick={() => onNavigate("rfs-approval")}
+                className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
+                  currentTab === "rfs-approval"
+                    ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
+                    : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
+                }`}
+              >
+                RFS Approval
+              </button>
+            )}
 
             {currentUser.role === UserRole.Administrator && (
               <>
