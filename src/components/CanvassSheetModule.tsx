@@ -712,7 +712,16 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden" id="canvass-module-root">
+    <div id="smei-canvass-list" className="p-6 md:p-10 space-y-6 max-w-[130rem] mx-auto w-full">
+      {/* Upper Action Bar */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-800 tracking-tight font-display">Canvass Sheets Directory</h2>
+          <p className="text-sm text-gray-500 mt-0.5">Compare supplier bids, compute VAT/Non-VAT compliance, and determine optimal sourcing</p>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden" id="canvass-module-root">
       {/* Search and Filters Header */}
       <div className="p-6 border-b border-gray-100 bg-gray-50/50 flex flex-col gap-4">
         <div className="flex flex-col md:flex-row items-center justify-between gap-4">
@@ -740,8 +749,8 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
 
       {/* Split Layout for Canvass Grid and Live Preview */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start p-6">
-        {/* Left Column: Canvass Table */}
-        <div className="lg:col-span-5 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[calc(100vh-280px)] min-h-[500px]">
+        {/* Left Column: Canvass Table (Expanded to 58.33% / col-span-7 for enterprise screens) */}
+        <div className="lg:col-span-7 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[calc(100vh-280px)] min-h-[500px]">
           <div className="overflow-x-auto flex-1 overflow-y-auto">
             <table className="w-full text-left border-collapse">
               <thead className="sticky top-0 bg-white z-10 shadow-sm">
@@ -848,8 +857,8 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
           </div>
         </div>
 
-        {/* Right Column: Live Document Preview */}
-        <div className="lg:col-span-7 h-[calc(100vh-280px)] min-h-[500px] sticky top-6">
+        {/* Right Column: Live Document Preview (Set to 41.67% / col-span-5 to balance layout) */}
+        <div className="lg:col-span-5 h-[calc(100vh-280px)] min-h-[500px] sticky top-6">
           {sheets.find((s) => s.id === activeSheetId) ? (
             <DocumentPreview
               moduleName="canvass"
@@ -1477,6 +1486,7 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
           </div>
         </div>
       )}
+    </div>
     </div>
   );
 }

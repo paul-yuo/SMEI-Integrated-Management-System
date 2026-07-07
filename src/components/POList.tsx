@@ -224,7 +224,7 @@ export default function POList({
   };
 
   return (
-    <div id="smei-po-list" className="p-6 md:p-10 space-y-6 max-w-7xl mx-auto">
+    <div id="smei-po-list" className="p-6 md:p-10 space-y-6 max-w-[130rem] mx-auto w-full">
       {/* Upper Action Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -325,8 +325,8 @@ export default function POList({
 
       {/* Split Layout for Grid and Live Preview */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left column: List table */}
-        <div className="lg:col-span-5 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[calc(100vh-280px)] min-h-[500px]">
+        {/* Left column: List table (Expanded to 58.33% / col-span-7 for enterprise screens) */}
+        <div className="lg:col-span-7 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[calc(100vh-280px)] min-h-[500px]">
           <div className="overflow-x-auto overflow-y-auto flex-1">
             <table id="smei-po-table" className="w-full text-left border-collapse min-w-[600px]">
               <thead className="sticky top-0 bg-gray-50 z-10 shadow-sm">
@@ -371,8 +371,8 @@ export default function POList({
           </div>
         </div>
 
-        {/* Right column: Live Document Preview */}
-        <div className="lg:col-span-7 h-[calc(100vh-280px)] min-h-[500px] sticky top-6">
+        {/* Right column: Live Document Preview (Set to 41.67% / col-span-5 to balance layout) */}
+        <div className="lg:col-span-5 h-[calc(100vh-280px)] min-h-[500px] sticky top-6">
           {pos.find((p) => p.id === selectedPOId) ? (
             <DocumentPreview
               moduleName="po"

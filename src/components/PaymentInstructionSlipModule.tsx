@@ -412,7 +412,7 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
 
 
   return (
-    <div id="smei-pis-list" className="p-6 md:p-10 space-y-6 max-w-7xl mx-auto">
+    <div id="smei-pis-list" className="p-6 md:p-10 space-y-6 max-w-[130rem] mx-auto w-full">
       {/* Upper Action Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -501,8 +501,8 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
 
       {/* Split Layout for PIS Grid and Live Preview */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start p-6">
-        {/* Left Column: PIS Table */}
-        <div className="lg:col-span-5 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[calc(100vh-280px)] min-h-[500px]">
+        {/* Left Column: PIS Table (Expanded to 58.33% / col-span-7 for enterprise screens) */}
+        <div className="lg:col-span-7 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[calc(100vh-280px)] min-h-[500px]">
           <div className="overflow-x-auto flex-1 overflow-y-auto">
             <table className="w-full text-left border-collapse min-w-[600px]">
               <thead className="sticky top-0 bg-white z-10 shadow-sm">
@@ -610,8 +610,8 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
           </div>
         </div>
 
-        {/* Right Column: Live Document Preview */}
-        <div className="lg:col-span-7 h-[calc(100vh-280px)] min-h-[500px] sticky top-6">
+        {/* Right Column: Live Document Preview (Set to 41.67% / col-span-5 to balance layout) */}
+        <div className="lg:col-span-5 h-[calc(100vh-280px)] min-h-[500px] sticky top-6">
           {selectedSlip ? (
             <DocumentPreview
               moduleName="pis"

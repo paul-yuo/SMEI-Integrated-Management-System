@@ -140,20 +140,29 @@ export default function DocumentPreview({ moduleName, format, data }: DocumentPr
     setRefreshTrigger((prev) => prev + 1);
   };
 
-  // Perform automatic fit width on initial load or on format switch
-  const lastFitRef = useRef<string>("");
+  // Handle ResizeObserver to automatically recalculate zoom on container resize (collapsing sidebar, window resize, etc.)
   useEffect(() => {
-    if (!loading && !error) {
-      const currentFitKey = `${moduleName}-${activeFormat}`;
-      if (lastFitRef.current !== currentFitKey) {
-        lastFitRef.current = currentFitKey;
-        const timer = setTimeout(() => {
-          handleFitWidth();
-        }, 150);
-        return () => clearTimeout(timer);
-      }
-    }
-  }, [loading, error, moduleName, activeFormat]);
+    if (!wrapperRef.current) return;
+
+    let resizeTimer: NodeJS.Timeout;
+    const observer = new ResizeObserver(() => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        if (!loading && !error && wrapperRef.current) {
+          const wrapperWidth = wrapperRef.current.clientWidth - 48; // subtract padding
+          const targetWidth = activeFormat === "word" ? 816 : 900;
+          const computedZoom = Math.floor((wrapperWidth / targetWidth) * 100);
+          setZoom(Math.max(45, Math.min(computedZoom, 150)));
+        }
+      }, 100);
+    });
+
+    observer.observe(wrapperRef.current);
+    return () => {
+      observer.disconnect();
+      clearTimeout(resizeTimer);
+    };
+  }, [loading, error, activeFormat]);
 
   return (
     <div className="flex flex-col h-full bg-slate-50 border border-slate-200 rounded-xl overflow-hidden shadow-sm" id="document-preview-panel">

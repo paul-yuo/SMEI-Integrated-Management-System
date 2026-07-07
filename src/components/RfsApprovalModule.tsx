@@ -66,6 +66,17 @@ export default function RfsApprovalModule({ currentUser }: RfsApprovalModuleProp
     setCurrentPage(1);
   }, [search, statusFilter]);
 
+  useEffect(() => {
+    if (isModalOpen) {
+      window.dispatchEvent(new CustomEvent("smei-editor-opened"));
+    } else {
+      window.dispatchEvent(new CustomEvent("smei-editor-closed"));
+    }
+    return () => {
+      window.dispatchEvent(new CustomEvent("smei-editor-closed"));
+    };
+  }, [isModalOpen]);
+
   const currentRFSData = useMemo<RequestForSupply | null>(() => {
     if (!selectedRFS) return null;
     return {
@@ -370,7 +381,7 @@ export default function RfsApprovalModule({ currentUser }: RfsApprovalModuleProp
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 max-h-[80vh] overflow-y-auto">
               {/* Left Column: Form Editor */}
-              <div className="lg:col-span-7">
+              <div className="lg:col-span-6">
                 <form onSubmit={handleSave} className="space-y-4">
                   {error && (
                     <div className="bg-red-50 border border-red-200 text-red-700 text-xs px-3 py-2 rounded-lg">
@@ -431,7 +442,7 @@ export default function RfsApprovalModule({ currentUser }: RfsApprovalModuleProp
               </div>
 
               {/* Right Column: Live Document Preview */}
-              <div className="lg:col-span-5 h-[450px] lg:h-[70vh] sticky top-0">
+              <div className="lg:col-span-6 h-[450px] lg:h-[70vh] sticky top-0">
                 {currentRFSData && (
                   <DocumentPreview
                     moduleName="rfs"
