@@ -10,6 +10,7 @@ import { Search, Plus, Filter, Calendar, FileText, ArrowUpDown, Trash2, Edit3, E
 import { exportWordWithTemplate, exportExcelWithTemplate } from "../utils/templateExport";
 import { ExportExcelButton, CreateButton } from "./SharedButtons";
 import { TableSkeleton } from "./ui/Skeleton";
+import DocumentPreview from "./DocumentPreview";
 
 interface PISModuleProps {
   currentUser: User;
@@ -120,6 +121,55 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
   useEffect(() => {
     setCurrentPage(1);
   }, [search, statusFilter, currencyFilter, paymentModeFilter]);
+
+  useEffect(() => {
+    if (isModalOpen) {
+      window.dispatchEvent(new CustomEvent("smei-editor-opened"));
+    } else {
+      window.dispatchEvent(new CustomEvent("smei-editor-closed"));
+    }
+    return () => {
+      window.dispatchEvent(new CustomEvent("smei-editor-closed"));
+    };
+  }, [isModalOpen]);
+
+  const currentPISData = useMemo<PaymentInstructionSlip>(() => {
+    return {
+      id: selectedSlip?.id || "temp-pis-id",
+      pisNumber,
+      scheduleDate,
+      scheduleTime,
+      ampm,
+      payee,
+      gross,
+      ewt,
+      total,
+      amount,
+      currency,
+      currencyOthers,
+      paymentMode,
+      paymentModeOthers,
+      remarks,
+      requestedBy,
+      requestedDate,
+      checkedAndVerifiedBy,
+      checkedAndVerifiedByPosition,
+      verifiedBy,
+      verifiedByPosition,
+      verifiedByDate,
+      acceptedBy,
+      acceptedByPosition,
+      acceptedByDate,
+      status,
+      created_by: selectedSlip?.created_by || currentUser.fullName,
+      createdAt: selectedSlip?.createdAt || new Date().toISOString()
+    };
+  }, [
+    selectedSlip, pisNumber, scheduleDate, scheduleTime, ampm, payee, gross, ewt, total, amount,
+    currency, currencyOthers, paymentMode, paymentModeOthers, remarks, requestedBy, requestedDate,
+    checkedAndVerifiedBy, checkedAndVerifiedByPosition, verifiedBy, verifiedByPosition, verifiedByDate,
+    acceptedBy, acceptedByPosition, acceptedByDate, status, currentUser
+  ]);
 
   // Open modal for Create/View/Edit
   const handleOpenModal = async (slip: PaymentInstructionSlip | null = null, edit = false) => {
@@ -449,119 +499,138 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
         </div>
       </div>
 
-      {/* Main Table */}
-      <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
-        <table className="w-full text-left border-collapse min-w-[1000px]">
-          <thead>
-            <tr className="bg-red-50/20 text-gray-600 border-b border-gray-100 text-[11px] font-bold uppercase tracking-wider">
-              <th className="py-4 px-6">PIS Number</th>
-              <th className="py-4 px-6">Payee</th>
-              <th className="py-4 px-6">Schedule</th>
-              <th className="py-4 px-6 text-right">Amount</th>
-              <th className="py-4 px-6">Payment Mode</th>
-              <th className="py-4 px-6">Status</th>
-              <th className="py-4 px-6 text-center">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="text-xs">
-            {loading ? (
-              <TableSkeleton rows={5} columns={7} />
-            ) : paginatedSlips.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="py-12 text-center text-gray-400">
-                  No Payment Instruction Slips found matching filters.
-                </td>
-              </tr>
-            ) : (
-              filteredSlips.map((slip, idx) => (
-                <tr
-                  key={slip.id}
-                  onClick={() => {
-                      setActiveSlipId(slip.id);
-                      setSelectedSlip(slip);
-                  }}
-                  onDoubleClick={() => handleOpenModal(slip, isAuthorized)}
-                  className={`cursor-pointer transition-all border-b border-gray-50/60 group ${
-                    activeSlipId === slip.id
-                      ? "bg-red-600/20 border-l-4 border-l-smei-crimson font-medium"
-                      : idx % 2 === 1
-                      ? "bg-gray-50/30 hover:bg-red-600/10"
-                      : "bg-white hover:bg-red-600/10"
-                  }`}
-                  title="Double-click to View/Edit details"
-                >
-                  <td className="py-3 px-6 font-mono font-bold text-smei-darkred">
-                    <div className="flex items-center gap-2">
-                      {activeSlipId === slip.id && (
-                        <div className="w-1.5 h-1.5 bg-smei-crimson rounded-full animate-pulse shrink-0" />
-                      )}
-                      <span>{slip.pisNumber}</span>
-                    </div>
-                  </td>
-                  <td className="py-3 px-6 font-semibold text-gray-800">{slip.payee}</td>
-                  <td className="py-3 px-6 text-gray-500 font-mono">
-                    {slip.scheduleDate} {slip.scheduleTime} {slip.ampm}
-                  </td>
-                  <td className="py-3 px-6 text-right font-mono font-bold text-gray-800">
-                    {new Intl.NumberFormat("en-PH", {
-                      style: "currency",
-                      currency: slip.currency === "Others" ? "PHP" : (slip.currency === "JP Yen" ? "JPY" : slip.currency),
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    }).format(slip.amount)}
-                  </td>
-                  <td className="py-3 px-6 text-gray-600 text-xs">
-                    {slip.paymentMode === "Others" ? slip.paymentModeOthers : slip.paymentMode}
-                  </td>
-                  <td className="py-3 px-6">
-                    <span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-bold border ${statusColors[slip.status] || "bg-gray-100"}`}>
-                      {slip.status}
-                    </span>
-                  </td>
-                  <td className="py-3 px-6 text-center" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
-                    <div className="flex items-center justify-center gap-1.5">
-                      <button
-                        onClick={() => handleOpenModal(slip, false)}
-                        className="p-1 hover:bg-red-50 hover:text-smei-crimson text-gray-400 rounded transition-all"
-                        title="View PIS details"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
-
-                      {isAuthorized && (
-                        <button
-                          onClick={() => handleOpenModal(slip, true)}
-                          className="p-1 hover:bg-blue-50 hover:text-blue-600 text-gray-400 rounded transition-all"
-                          title="Edit PIS"
-                        >
-                          <Edit3 className="w-4 h-4" />
-                        </button>
-                      )}
-
-
-
-                      {isAuthorized && (
-                        <button
-                          onClick={() => handleDelete(slip.id, slip.pisNumber)}
-                          className="p-1 hover:bg-rose-50 hover:text-rose-600 text-gray-400 rounded transition-all"
-                          title="Delete PIS"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                  </td>
+      {/* Split Layout for PIS Grid and Live Preview */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start p-6">
+        {/* Left Column: PIS Table */}
+        <div className="lg:col-span-5 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[calc(100vh-280px)] min-h-[500px]">
+          <div className="overflow-x-auto flex-1 overflow-y-auto">
+            <table className="w-full text-left border-collapse min-w-[600px]">
+              <thead className="sticky top-0 bg-white z-10 shadow-sm">
+                <tr className="bg-red-50/20 text-gray-600 border-b border-gray-100 text-[11px] font-bold uppercase tracking-wider">
+                  <th className="py-4 px-6">PIS Number</th>
+                  <th className="py-4 px-6">Payee</th>
+                  <th className="py-4 px-6">Schedule</th>
+                  <th className="py-4 px-6 text-right">Amount</th>
+                  <th className="py-4 px-6">Payment Mode</th>
+                  <th className="py-4 px-6">Status</th>
+                  <th className="py-4 px-6 text-center">Actions</th>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              </thead>
+              <tbody className="text-xs">
+                {loading ? (
+                  <TableSkeleton rows={5} columns={7} />
+                ) : paginatedSlips.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-12 text-center text-gray-400">
+                      No Payment Instruction Slips found matching filters.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredSlips.map((slip, idx) => (
+                    <tr
+                      key={slip.id}
+                      onClick={() => {
+                          setActiveSlipId(slip.id);
+                          setSelectedSlip(slip);
+                      }}
+                      onDoubleClick={() => handleOpenModal(slip, isAuthorized)}
+                      className={`cursor-pointer transition-all border-b border-gray-50/60 group ${
+                        activeSlipId === slip.id
+                          ? "bg-red-600/20 border-l-4 border-l-smei-crimson font-medium"
+                          : idx % 2 === 1
+                          ? "bg-gray-50/30 hover:bg-red-600/10"
+                          : "bg-white hover:bg-red-600/10"
+                      }`}
+                      title="Double-click to View/Edit details"
+                    >
+                      <td className="py-3 px-6 font-mono font-bold text-smei-darkred">
+                        <div className="flex items-center gap-2">
+                          {activeSlipId === slip.id && (
+                            <div className="w-1.5 h-1.5 bg-smei-crimson rounded-full animate-pulse shrink-0" />
+                          )}
+                          <span>{slip.pisNumber}</span>
+                        </div>
+                      </td>
+                      <td className="py-3 px-6 font-semibold text-gray-800">{slip.payee}</td>
+                      <td className="py-3 px-6 text-gray-500 font-mono">
+                        {slip.scheduleDate} {slip.scheduleTime} {slip.ampm}
+                      </td>
+                      <td className="py-3 px-6 text-right font-mono font-bold text-gray-800">
+                        {new Intl.NumberFormat("en-PH", {
+                          style: "currency",
+                          currency: slip.currency === "Others" ? "PHP" : (slip.currency === "JP Yen" ? "JPY" : slip.currency),
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        }).format(slip.amount)}
+                      </td>
+                      <td className="py-3 px-6 text-gray-600 text-xs">
+                        {slip.paymentMode === "Others" ? slip.paymentModeOthers : slip.paymentMode}
+                      </td>
+                      <td className="py-3 px-6">
+                        <span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-bold border ${statusColors[slip.status] || "bg-gray-100"}`}>
+                          {slip.status}
+                        </span>
+                      </td>
+                      <td className="py-3 px-6 text-center" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => handleOpenModal(slip, false)}
+                            className="p-1 hover:bg-red-50 hover:text-smei-crimson text-gray-400 rounded transition-all"
+                            title="View PIS details"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+
+                          {isAuthorized && (
+                            <button
+                              onClick={() => handleOpenModal(slip, true)}
+                              className="p-1 hover:bg-blue-50 hover:text-blue-600 text-gray-400 rounded transition-all"
+                              title="Edit PIS"
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </button>
+                          )}
+
+                          {isAuthorized && (
+                            <button
+                              onClick={() => handleDelete(slip.id, slip.pisNumber)}
+                              className="p-1 hover:bg-rose-50 hover:text-rose-600 text-gray-400 rounded transition-all"
+                              title="Delete PIS"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Right Column: Live Document Preview */}
+        <div className="lg:col-span-7 h-[calc(100vh-280px)] min-h-[500px] sticky top-6">
+          {selectedSlip ? (
+            <DocumentPreview
+              moduleName="pis"
+              format="excel"
+              data={selectedSlip}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full bg-slate-50 border border-slate-200 border-dashed rounded-xl p-8 text-slate-400">
+              <FileText className="w-12 h-12 text-slate-300 mb-2 animate-pulse" />
+              <p className="text-sm font-medium">Select a PIS document to display live preview</p>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* View/Create/Edit Modal Dialog */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 flex items-center justify-center p-4 backdrop-blur-xs">
-          <div className="bg-white rounded-xl shadow-xl border border-gray-100 w-full max-w-3xl overflow-hidden transition-all scale-100">
+          <div className="bg-white rounded-xl shadow-xl border border-gray-100 w-full max-w-7xl overflow-hidden transition-all scale-100">
             <div className="bg-smei-crimson text-white px-6 py-4 flex items-center justify-between">
               <div>
                 <h3 className="text-base font-bold uppercase tracking-wide">
@@ -574,363 +643,377 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
-              {errors.server && (
-                <div className="bg-rose-50 border-l-4 border-rose-500 text-rose-700 text-xs p-3 rounded-md font-medium">
-                  {errors.server}
-                </div>
-              )}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 max-h-[80vh] overflow-y-auto">
+              {/* Left Column: Form Editor */}
+              <div className="lg:col-span-6">
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  {errors.server && (
+                    <div className="bg-rose-50 border-l-4 border-rose-500 text-rose-700 text-xs p-3 rounded-md font-medium">
+                      {errors.server}
+                    </div>
+                  )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* PIS Number */}
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">PIS Document Number: *</label>
-                  <input
-                    type="text"
-                    required
-                    disabled={!isEditMode}
-                    className={`w-full text-sm font-mono font-semibold p-2 border rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none ${
-                      errors.pisNumber ? "border-rose-500 bg-rose-50/20" : "border-gray-200 bg-gray-50"
-                    }`}
-                    value={pisNumber}
-                    onChange={(e) => setPisNumber(e.target.value)}
-                    placeholder="PURC-PIS-YY-###"
-                  />
-                  {errors.pisNumber && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.pisNumber}</p>}
-                </div>
-
-                {/* Status */}
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">Slip Status:</label>
-                  <select
-                    disabled={!isEditMode}
-                    className="w-full text-sm p-2 border border-gray-200 rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson bg-white outline-none"
-                    value={status}
-                    onChange={(e: any) => setStatus(e.target.value)}
-                  >
-                    <option value="Draft">Draft</option>
-                    <option value="Pending">Pending Approval</option>
-                    <option value="Approved">Approved</option>
-                    <option value="Released">Released</option>
-                    <option value="Cancelled">Cancelled</option>
-                  </select>
-                </div>
-
-                {/* Payee */}
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-bold text-gray-700 mb-1">Payee Name: *</label>
-                  <input
-                    type="text"
-                    required
-                    disabled={!isEditMode}
-                    placeholder="Enter recipient company or person"
-                    className={`w-full text-sm p-2 border rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none ${
-                      errors.payee ? "border-rose-500 bg-rose-50/20" : "border-gray-200"
-                    }`}
-                    value={payee}
-                    onChange={(e) => setPayee(e.target.value)}
-                  />
-                  {errors.payee && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.payee}</p>}
-                </div>
-
-                {/* Gross, EWT, and Total Calculations */}
-                <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-4 bg-gray-50/80 p-4 rounded-xl border border-gray-100">
-                  {/* Gross */}
-                  <div>
-                    <label className="block text-xs font-bold text-gray-700 mb-1">Gross Amount:</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-2 text-xs font-bold text-gray-400">₱</span>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* PIS Number */}
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">PIS Document Number: *</label>
                       <input
-                        type="number"
-                        step="any"
+                        type="text"
+                        required
                         disabled={!isEditMode}
-                        placeholder="0.00"
-                        className={`w-full text-sm pl-7 pr-2 p-2 border rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson bg-white outline-none ${
-                          errors.gross ? "border-rose-500 bg-rose-50/20" : "border-gray-200"
+                        className={`w-full text-sm font-mono font-semibold p-2 border rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none ${
+                          errors.pisNumber ? "border-rose-500 bg-rose-50/20" : "border-gray-200 bg-gray-50"
                         }`}
-                        value={gross === 0 ? "" : gross}
-                        onChange={(e) => setGross(e.target.value === "" ? 0 : Number(e.target.value))}
+                        value={pisNumber}
+                        onChange={(e) => setPisNumber(e.target.value)}
+                        placeholder="PURC-PIS-YY-###"
                       />
+                      {errors.pisNumber && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.pisNumber}</p>}
                     </div>
-                    {errors.gross && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.gross}</p>}
-                  </div>
 
-                  {/* EWT (%) */}
-                  <div>
-                    <label className="block text-xs font-bold text-gray-700 mb-1">EWT (%):</label>
-                    <div className="relative">
-                      <input
-                        type="number"
-                        step="any"
-                        disabled={!isEditMode}
-                        placeholder="0.00"
-                        className={`w-full text-sm pr-7 p-2 border rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson bg-white outline-none ${
-                          errors.ewt ? "border-rose-500 bg-rose-50/20" : "border-gray-200"
-                        }`}
-                        value={ewt === 0 ? "" : ewt}
-                        onChange={(e) => setEwt(e.target.value === "" ? 0 : Number(e.target.value))}
-                      />
-                      <span className="absolute right-3 top-2 text-xs font-bold text-gray-400">%</span>
-                    </div>
-                    {errors.ewt && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.ewt}</p>}
-                  </div>
-
-                  {/* Total */}
-                  <div>
-                    <label className="block text-xs font-bold text-gray-700 mb-1">Total Net Amount:</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-2 text-xs font-bold text-gray-500">₱</span>
-                      <input
-                        type="number"
-                        disabled
-                        placeholder="0.00"
-                        className="w-full text-sm pl-7 pr-2 p-2 border border-gray-100 rounded-lg bg-gray-100 font-mono font-bold text-gray-700 outline-none"
-                        value={total}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Schedule Date */}
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">Schedule Date to Pay: *</label>
-                  <input
-                    type="date"
-                    required
-                    disabled={!isEditMode}
-                    className={`w-full text-sm p-2 border rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none ${
-                      errors.scheduleDate ? "border-rose-500 bg-rose-50/20" : "border-gray-200"
-                    }`}
-                    value={scheduleDate}
-                    onChange={(e) => setScheduleDate(e.target.value)}
-                  />
-                  {errors.scheduleDate && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.scheduleDate}</p>}
-                </div>
-
-                {/* Blank element to balance row */}
-                <div className="hidden md:block"></div>
-
-                {/* Consolidated Time, Payment Mode, and Currency Row */}
-                <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {/* Schedule Time */}
-                  <div className="flex gap-2">
-                    <div className="w-2/3">
-                      <label className="block text-xs font-bold text-gray-700 mb-1">Time:</label>
-                      <input
-                        type="time"
-                        disabled={!isEditMode}
-                        className="w-full text-sm p-2 border border-gray-200 rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none"
-                        value={scheduleTime}
-                        onChange={(e) => setScheduleTime(e.target.value)}
-                      />
-                    </div>
-                    <div className="w-1/3">
-                      <label className="block text-xs font-bold text-gray-700 mb-1">AM/PM:</label>
+                    {/* Status */}
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">Slip Status:</label>
                       <select
                         disabled={!isEditMode}
                         className="w-full text-sm p-2 border border-gray-200 rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson bg-white outline-none"
-                        value={ampm}
-                        onChange={(e: any) => setAmpm(e.target.value)}
+                        value={status}
+                        onChange={(e: any) => setStatus(e.target.value)}
                       >
-                        <option value="AM">AM</option>
-                        <option value="PM">PM</option>
+                        <option value="Draft">Draft</option>
+                        <option value="Pending">Pending Approval</option>
+                        <option value="Approved">Approved</option>
+                        <option value="Released">Released</option>
+                        <option value="Cancelled">Cancelled</option>
                       </select>
+                    </div>
+
+                    {/* Payee */}
+                    <div className="md:col-span-2">
+                      <label className="block text-xs font-bold text-gray-700 mb-1">Payee Name: *</label>
+                      <input
+                        type="text"
+                        required
+                        disabled={!isEditMode}
+                        placeholder="Enter recipient company or person"
+                        className={`w-full text-sm p-2 border rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none ${
+                          errors.payee ? "border-rose-500 bg-rose-50/20" : "border-gray-200"
+                        }`}
+                        value={payee}
+                        onChange={(e) => setPayee(e.target.value)}
+                      />
+                      {errors.payee && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.payee}</p>}
+                    </div>
+
+                    {/* Gross, EWT, and Total Calculations */}
+                    <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-4 bg-gray-50/80 p-4 rounded-xl border border-gray-100">
+                      {/* Gross */}
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">Gross Amount:</label>
+                        <div className="relative">
+                          <span className="absolute left-3 top-2 text-xs font-bold text-gray-400">₱</span>
+                          <input
+                            type="number"
+                            step="any"
+                            disabled={!isEditMode}
+                            placeholder="0.00"
+                            className={`w-full text-sm pl-7 pr-2 p-2 border rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson bg-white outline-none ${
+                              errors.gross ? "border-rose-500 bg-rose-50/20" : "border-gray-200"
+                            }`}
+                            value={gross === 0 ? "" : gross}
+                            onChange={(e) => setGross(e.target.value === "" ? 0 : Number(e.target.value))}
+                          />
+                        </div>
+                        {errors.gross && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.gross}</p>}
+                      </div>
+
+                      {/* EWT (%) */}
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">EWT (%):</label>
+                        <div className="relative">
+                          <input
+                            type="number"
+                            step="any"
+                            disabled={!isEditMode}
+                            placeholder="0.00"
+                            className={`w-full text-sm pr-7 p-2 border rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson bg-white outline-none ${
+                              errors.ewt ? "border-rose-500 bg-rose-50/20" : "border-gray-200"
+                            }`}
+                            value={ewt === 0 ? "" : ewt}
+                            onChange={(e) => setEwt(e.target.value === "" ? 0 : Number(e.target.value))}
+                          />
+                          <span className="absolute right-3 top-2 text-xs font-bold text-gray-400">%</span>
+                        </div>
+                        {errors.ewt && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.ewt}</p>}
+                      </div>
+
+                      {/* Total */}
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">Total Net Amount:</label>
+                        <div className="relative">
+                          <span className="absolute left-3 top-2 text-xs font-bold text-gray-500">₱</span>
+                          <input
+                            type="number"
+                            disabled
+                            placeholder="0.00"
+                            className="w-full text-sm pl-7 pr-2 p-2 border border-gray-100 rounded-lg bg-gray-100 font-mono font-bold text-gray-700 outline-none"
+                            value={total}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Schedule Date */}
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">Schedule Date to Pay: *</label>
+                      <input
+                        type="date"
+                        required
+                        disabled={!isEditMode}
+                        className={`w-full text-sm p-2 border rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none ${
+                          errors.scheduleDate ? "border-rose-500 bg-rose-50/20" : "border-gray-200"
+                        }`}
+                        value={scheduleDate}
+                        onChange={(e) => setScheduleDate(e.target.value)}
+                      />
+                      {errors.scheduleDate && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.scheduleDate}</p>}
+                    </div>
+
+                    {/* Blank element to balance row */}
+                    <div className="hidden md:block"></div>
+
+                    {/* Consolidated Time, Payment Mode, and Currency Row */}
+                    <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {/* Schedule Time */}
+                      <div className="flex gap-2">
+                        <div className="w-2/3">
+                          <label className="block text-xs font-bold text-gray-700 mb-1">Time:</label>
+                          <input
+                            type="time"
+                            disabled={!isEditMode}
+                            className="w-full text-sm p-2 border border-gray-200 rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none"
+                            value={scheduleTime}
+                            onChange={(e) => setScheduleTime(e.target.value)}
+                          />
+                        </div>
+                        <div className="w-1/3">
+                          <label className="block text-xs font-bold text-gray-700 mb-1">AM/PM:</label>
+                          <select
+                            disabled={!isEditMode}
+                            className="w-full text-sm p-2 border border-gray-200 rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson bg-white outline-none"
+                            value={ampm}
+                            onChange={(e: any) => setAmpm(e.target.value)}
+                          >
+                            <option value="AM">AM</option>
+                            <option value="PM">PM</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Payment Mode */}
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">Payment Mode:</label>
+                        <div className="flex gap-2">
+                          <select
+                            disabled={!isEditMode}
+                            className="w-1/2 text-sm p-2 border border-gray-200 rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson bg-white outline-none"
+                            value={paymentMode}
+                            onChange={(e: any) => setPaymentMode(e.target.value)}
+                          >
+                            <option value="Cash">Cash</option>
+                            <option value="Check Crossed">Check Crossed</option>
+                            <option value="Check Not Crossed">Check Not Crossed</option>
+                            <option value="T/T">T/T</option>
+                            <option value="Others">Others</option>
+                          </select>
+                          {paymentMode === "Others" && (
+                            <input
+                              type="text"
+                              required
+                              disabled={!isEditMode}
+                              placeholder="Specify mode"
+                              className="w-1/2 text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson"
+                              value={paymentModeOthers}
+                              onChange={(e) => setPaymentModeOthers(e.target.value)}
+                            />
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Currency */}
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">Currency:</label>
+                        <div className="flex gap-2">
+                          <select
+                            disabled={!isEditMode}
+                            className="w-1/2 text-sm p-2 border border-gray-200 rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson bg-white outline-none"
+                            value={currency}
+                            onChange={(e: any) => setCurrency(e.target.value)}
+                          >
+                            <option value="PHP">PHP</option>
+                            <option value="USD">USD</option>
+                            <option value="JP Yen">JP Yen</option>
+                            <option value="Others">Others</option>
+                          </select>
+                          {currency === "Others" && (
+                            <input
+                              type="text"
+                              required
+                              disabled={!isEditMode}
+                              placeholder="Specify"
+                              className="w-1/2 text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson"
+                              value={currencyOthers}
+                              onChange={(e) => setCurrencyOthers(e.target.value)}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Remarks / Narrative (Increased width to col-span-2) */}
+                    <div className="md:col-span-2">
+                      <label className="block text-xs font-bold text-gray-700 mb-1">Remarks / Narrative</label>
+                      <input
+                        type="text"
+                        disabled={!isEditMode}
+                        placeholder="e.g. For structural casting downpayment"
+                        className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson"
+                        value={remarks}
+                        onChange={(e) => setRemarks(e.target.value)}
+                      />
                     </div>
                   </div>
 
-                  {/* Payment Mode */}
-                  <div>
-                    <label className="block text-xs font-bold text-gray-700 mb-1">Payment Mode:</label>
-                    <div className="flex gap-2">
-                      <select
-                        disabled={!isEditMode}
-                        className="w-1/2 text-sm p-2 border border-gray-200 rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson bg-white outline-none"
-                        value={paymentMode}
-                        onChange={(e: any) => setPaymentMode(e.target.value)}
-                      >
-                        <option value="Cash">Cash</option>
-                        <option value="Check Crossed">Check Crossed</option>
-                        <option value="Check Not Crossed">Check Not Crossed</option>
-                        <option value="T/T">T/T</option>
-                        <option value="Others">Others</option>
-                      </select>
-                      {paymentMode === "Others" && (
+                  {/* Signatories Section */}
+                  <div className="border-t border-gray-100 pt-4 mt-2">
+                    <h4 className="text-xs font-bold text-smei-darkred uppercase tracking-wide mb-3">Signatories & Authorizations</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Requested By:</label>
                         <input
                           type="text"
-                          required
                           disabled={!isEditMode}
-                          placeholder="Specify mode"
-                          className="w-1/2 text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson"
-                          value={paymentModeOthers}
-                          onChange={(e) => setPaymentModeOthers(e.target.value)}
+                          className="w-full text-sm p-2 border border-gray-200 rounded-lg bg-gray-50/50"
+                          value={requestedBy}
+                          onChange={(e) => setRequestedBy(e.target.value)}
                         />
-                      )}
-                    </div>
-                  </div>
+                      </div>
 
-                  {/* Currency */}
-                  <div>
-                    <label className="block text-xs font-bold text-gray-700 mb-1">Currency:</label>
-                    <div className="flex gap-2">
-                      <select
-                        disabled={!isEditMode}
-                        className="w-1/2 text-sm p-2 border border-gray-200 rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson bg-white outline-none"
-                        value={currency}
-                        onChange={(e: any) => setCurrency(e.target.value)}
-                      >
-                        <option value="PHP">PHP</option>
-                        <option value="USD">USD</option>
-                        <option value="JP Yen">JP Yen</option>
-                        <option value="Others">Others</option>
-                      </select>
-                      {currency === "Others" && (
+                      <div>
+                        <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Checked & Verified By:</label>
                         <input
                           type="text"
-                          required
                           disabled={!isEditMode}
-                          placeholder="Specify"
-                          className="w-1/2 text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson"
-                          value={currencyOthers}
-                          onChange={(e) => setCurrencyOthers(e.target.value)}
+                          className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson"
+                          value={checkedAndVerifiedBy}
+                          onChange={(e) => setCheckedAndVerifiedBy(e.target.value)}
+                          placeholder="Name of verifier"
                         />
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Remarks / Narrative (Increased width to col-span-2) */}
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-bold text-gray-700 mb-1">Remarks / Narrative</label>
-                  <input
-                    type="text"
-                    disabled={!isEditMode}
-                    placeholder="e.g. For structural casting downpayment"
-                    className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson"
-                    value={remarks}
-                    onChange={(e) => setRemarks(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              {/* Signatories Section */}
-              <div className="border-t border-gray-100 pt-4 mt-2">
-                <h4 className="text-xs font-bold text-smei-darkred uppercase tracking-wide mb-3">Signatories & Authorizations</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Requested By:</label>
-                    <input
-                      type="text"
-                      disabled={!isEditMode}
-                      className="w-full text-sm p-2 border border-gray-200 rounded-lg bg-gray-50/50"
-                      value={requestedBy}
-                      onChange={(e) => setRequestedBy(e.target.value)}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Checked & Verified By:</label>
-                    <input
-                      type="text"
-                      disabled={!isEditMode}
-                      className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson"
-                      value={checkedAndVerifiedBy}
-                      onChange={(e) => setCheckedAndVerifiedBy(e.target.value)}
-                      placeholder="Name of verifier"
-                    />
-                    <div className="mt-1.5">
-                      <label className="block text-[10px] uppercase font-bold text-gray-400 mb-0.5">Position:</label>
-                      <input
-                        type="text"
-                        disabled={!isEditMode}
-                        className="w-full text-xs p-1.5 border border-gray-200 rounded-md outline-none focus:ring-1 focus:ring-smei-crimson"
-                        value={checkedAndVerifiedByPosition}
-                        onChange={(e) => setCheckedAndVerifiedByPosition(e.target.value)}
-                        placeholder="Position"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Acceptance and Verification Section */}
-              <div className="border-t border-dashed border-gray-300 my-4 pt-4">
-                {/* Notice Text */}
-                <div className="text-center bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3 mb-4 font-semibold text-xs tracking-wide">
-                  ⚠ For Encashment and Irregular Transactions Only
-                </div>
-                
-                <h4 className="text-xs font-bold text-smei-darkred uppercase tracking-wide mb-3">Acceptance and Verification</h4>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Left Column: Accepted By */}
-                  <div className="space-y-2 border border-gray-100 rounded-lg p-3 bg-gray-50/30">
-                    <label className="block text-[10px] uppercase font-bold text-gray-600 mb-1">Accepted By:</label>
-                    <input
-                      type="text"
-                      disabled={!isEditMode}
-                      className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson"
-                      value={acceptedBy}
-                      onChange={(e) => setAcceptedBy(e.target.value)}
-                      placeholder="Name of accepting officer"
-                    />
-                    <div className="mt-1.5">
-                      <label className="block text-[10px] uppercase font-bold text-gray-400 mb-0.5">Position:</label>
-                      <input
-                        type="text"
-                        disabled={!isEditMode}
-                        className="w-full text-xs p-1.5 border border-gray-200 rounded-md outline-none focus:ring-1 focus:ring-smei-crimson"
-                        value={acceptedByPosition}
-                        onChange={(e) => setAcceptedByPosition(e.target.value)}
-                        placeholder="Position"
-                      />
+                        <div className="mt-1.5">
+                          <label className="block text-[10px] uppercase font-bold text-gray-400 mb-0.5">Position:</label>
+                          <input
+                            type="text"
+                            disabled={!isEditMode}
+                            className="w-full text-xs p-1.5 border border-gray-200 rounded-md outline-none focus:ring-1 focus:ring-smei-crimson"
+                            value={checkedAndVerifiedByPosition}
+                            onChange={(e) => setCheckedAndVerifiedByPosition(e.target.value)}
+                            placeholder="Position"
+                          />
+                        </div>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Right Column: Verified By */}
-                  <div className="space-y-2 border border-gray-100 rounded-lg p-3 bg-gray-50/30">
-                    <label className="block text-[10px] uppercase font-bold text-gray-600 mb-1">Verified By:</label>
-                    <input
-                      type="text"
-                      disabled={!isEditMode}
-                      className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson"
-                      value={verifiedBy}
-                      onChange={(e) => setVerifiedBy(e.target.value)}
-                      placeholder="Name of verifier"
-                    />
-                    <div className="mt-1.5">
-                      <label className="block text-[10px] uppercase font-bold text-gray-400 mb-0.5">Position:</label>
-                      <input
-                        type="text"
-                        disabled={!isEditMode}
-                        className="w-full text-xs p-1.5 border border-gray-200 rounded-md outline-none focus:ring-1 focus:ring-smei-crimson"
-                        value={verifiedByPosition}
-                        onChange={(e) => setVerifiedByPosition(e.target.value)}
-                        placeholder="Position"
-                      />
+                  {/* Acceptance and Verification Section */}
+                  <div className="border-t border-dashed border-gray-300 my-4 pt-4">
+                    {/* Notice Text */}
+                    <div className="text-center bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3 mb-4 font-semibold text-xs tracking-wide">
+                      ⚠ For Encashment and Irregular Transactions Only
+                    </div>
+                    
+                    <h4 className="text-xs font-bold text-smei-darkred uppercase tracking-wide mb-3">Acceptance and Verification</h4>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Left Column: Accepted By */}
+                      <div className="space-y-2 border border-gray-100 rounded-lg p-3 bg-gray-50/30">
+                        <label className="block text-[10px] uppercase font-bold text-gray-600 mb-1">Accepted By:</label>
+                        <input
+                          type="text"
+                          disabled={!isEditMode}
+                          className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson"
+                          value={acceptedBy}
+                          onChange={(e) => setAcceptedBy(e.target.value)}
+                          placeholder="Name of accepting officer"
+                        />
+                        <div className="mt-1.5">
+                          <label className="block text-[10px] uppercase font-bold text-gray-400 mb-0.5">Position:</label>
+                          <input
+                            type="text"
+                            disabled={!isEditMode}
+                            className="w-full text-xs p-1.5 border border-gray-200 rounded-md outline-none focus:ring-1 focus:ring-smei-crimson"
+                            value={acceptedByPosition}
+                            onChange={(e) => setAcceptedByPosition(e.target.value)}
+                            placeholder="Position"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Right Column: Verified By */}
+                      <div className="space-y-2 border border-gray-100 rounded-lg p-3 bg-gray-50/30">
+                        <label className="block text-[10px] uppercase font-bold text-gray-600 mb-1">Verified By:</label>
+                        <input
+                          type="text"
+                          disabled={!isEditMode}
+                          className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson"
+                          value={verifiedBy}
+                          onChange={(e) => setVerifiedBy(e.target.value)}
+                          placeholder="Name of verifier"
+                        />
+                        <div className="mt-1.5">
+                          <label className="block text-[10px] uppercase font-bold text-gray-400 mb-0.5">Position:</label>
+                          <input
+                            type="text"
+                            disabled={!isEditMode}
+                            className="w-full text-xs p-1.5 border border-gray-200 rounded-md outline-none focus:ring-1 focus:ring-smei-crimson"
+                            value={verifiedByPosition}
+                            onChange={(e) => setVerifiedByPosition(e.target.value)}
+                            placeholder="Position"
+                          />
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
+
+                  {/* Form Buttons */}
+                  <div className="flex items-center justify-end gap-2 border-t border-gray-100 pt-4 mt-6">
+                    <button
+                      type="button"
+                      onClick={handleCloseModal}
+                      className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-semibold text-gray-600 hover:bg-gray-50"
+                    >
+                      {isEditMode ? "Cancel" : "Close"}
+                    </button>
+                    {isEditMode && (
+                      <button
+                        type="submit"
+                        className="px-5 py-2 bg-smei-crimson hover:bg-smei-darkred text-white text-sm font-semibold rounded-lg shadow-xs"
+                      >
+                        Save Changes
+                      </button>
+                    )}
+                  </div>
+                </form>
               </div>
 
-              {/* Form Buttons */}
-              <div className="flex items-center justify-end gap-2 border-t border-gray-100 pt-4 mt-6">
-                <button
-                  type="button"
-                  onClick={handleCloseModal}
-                  className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-semibold text-gray-600 hover:bg-gray-50"
-                >
-                  {isEditMode ? "Cancel" : "Close"}
-                </button>
-                {isEditMode && (
-                  <button
-                    type="submit"
-                    className="px-5 py-2 bg-smei-crimson hover:bg-smei-darkred text-white text-sm font-semibold rounded-lg shadow-xs"
-                  >
-                    Save Changes
-                  </button>
-                )}
+              {/* Right Column: Live Document Preview */}
+              <div className="lg:col-span-6 h-[450px] lg:h-[70vh] sticky top-0">
+                <DocumentPreview
+                  moduleName="pis"
+                  format="excel"
+                  data={currentPISData}
+                />
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}

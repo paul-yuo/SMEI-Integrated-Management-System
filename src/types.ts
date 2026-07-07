@@ -140,6 +140,8 @@ export interface PurchaseOrder {
   status: POStatus;
   currencySymbol?: string;
   rfsNumber?: string;
+  created_by?: string;
+  createdAt?: string;
   
   // History or Log
   updatedAt: string;
@@ -306,6 +308,8 @@ export interface CanvassSheet {
   // Dynamic Lists Support
   suppliersList?: any[];
   partsList?: any[];
+  shops?: any[];
+  parts?: any[];
   
   created_by: string;
   created_department?: string;

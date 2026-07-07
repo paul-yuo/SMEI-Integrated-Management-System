@@ -3,14 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { PurchaseOrder, POItem, Supplier, User, UserRole, POStatus, Signatory } from "../types";
 import { calculatePOFinancials } from "../store";
 import { api } from "../lib/api";
 import { motion } from "motion/react";
 import { ArrowLeft, Save, Send, CheckCircle2, AlertTriangle, Printer, Trash2, Plus, RefreshCw, PenTool, Check, FileCheck, CircleSlash, XCircle, FileText } from "lucide-react";
 import { exportPOToWord } from "../utils/wordExport";
+import { formatRFSNo } from "../utils/templateMapping";
 import smeiLogo from "../assets/images/smei_logo_1782431389924.jpg";
+import DocumentPreview from "./DocumentPreview";
 
 interface POFormProps {
   po?: PurchaseOrder | null; // Null means create new
@@ -131,6 +133,14 @@ export default function POForm({
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const initialValuesSet = useRef(false);
+
+  // Dispatch editor open and close events for auto-sidebar-collapsing
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("smei-editor-opened"));
+    return () => {
+      window.dispatchEvent(new CustomEvent("smei-editor-closed"));
+    };
+  }, []);
 
   // Initialize values ref
   useEffect(() => {
@@ -701,6 +711,68 @@ export default function POForm({
     })}`;
   };
 
+  const currentPOData = useMemo<PurchaseOrder>(() => {
+    return {
+      id: po?.id || "temp-po-id",
+      poNumber,
+      rfsNumber,
+      poDate,
+      deliveryDate,
+      supplierId,
+      supplierName,
+      attention,
+      telNo,
+      faxNo,
+      purpose,
+      category: poCategory === "Others" ? otherPoCategory : poCategory,
+      items: items.map(item => ({
+        ...item,
+        quantity: Number(item.quantity) || 0,
+        unitPrice: Number(item.unitPrice) || 0,
+        amount: Number(item.amount) || 0
+      })),
+      paymentTerms: paymentTermsDropdown === "Others" ? paymentTermsOthers : paymentTermsDropdown,
+      workDuration,
+      warranty: warrantyDropdown === "Others" ? warrantyOthers : warrantyDropdown,
+      remarks,
+      preparedBy,
+      checkedBy,
+      verifiedBy,
+      verifiedBy2,
+      approvedBy,
+      conforme,
+      totalAmount,
+      status,
+      discountVatAmount,
+      vatableAmount,
+      vat12,
+      vatExemptAmount,
+      zeroRatedAmount,
+      partsEwt1,
+      laborEwt2,
+      excludePreparedBy,
+      excludeCheckedBy,
+      excludeVerifiedBy,
+      excludeVerifiedBy2,
+      excludeApprovedBy,
+      excludeConforme,
+      additionalSignatories,
+      signatureUrl,
+      created_by: po?.created_by || currentUser.fullName,
+      createdAt: po?.createdAt || new Date().toISOString()
+    };
+  }, [
+    po, poNumber, rfsNumber, poDate, deliveryDate, supplierId, supplierName,
+    attention, telNo, faxNo, purpose, poCategory, otherPoCategory, items,
+    paymentTermsDropdown, paymentTermsOthers, workDuration, warrantyDropdown,
+    warrantyOthers, remarks, preparedBy, checkedBy, verifiedBy, verifiedBy2,
+    approvedBy, conforme, totalAmount, status, discountVatAmount, vatableAmount,
+    vat12, vatExemptAmount, zeroRatedAmount, partsEwt1, laborEwt2,
+    excludePreparedBy, excludeCheckedBy, excludeVerifiedBy, excludeVerifiedBy2,
+    excludeApprovedBy, excludeConforme, additionalSignatories, signatureUrl,
+    currentUser
+  ]);
+
   return (
     <div id="smei-po-form-container" className="p-4 md:p-10 max-w-7xl mx-auto space-y-6">
       
@@ -803,8 +875,11 @@ export default function POForm({
         </div>
       </div>
 
-      {/* Actual Form Document Card (Replicates official physical layout) */}
-      <form onSubmit={(e) => handleFormSave(e, false)} className="bg-white p-6 sm:p-10 rounded-2xl shadow-xl border border-gray-100 print:shadow-none print:border-none print:p-0 space-y-8">
+      {/* Split Layout for PO Form and Live Preview */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left Column: Form Editor */}
+        <div className="lg:col-span-6">
+          <form onSubmit={(e) => handleFormSave(e, false)} className="bg-white p-6 sm:p-10 rounded-2xl shadow-xl border border-gray-100 print:shadow-none print:border-none print:p-0 space-y-8">
         
         {/* Printable Header Block */}
         <div className="flex flex-col md:flex-row items-center gap-6 justify-between border-b-2 border-smei-crimson pb-6">
@@ -836,7 +911,7 @@ export default function POForm({
             </h3>
             <div className="text-xs font-mono">
               <span className="text-gray-400">RFS No:</span>{" "}
-              <span className="font-bold text-smei-darkred">{rfsNumber || "N/A"}</span>
+              <span className="font-bold text-smei-darkred">{rfsNumber ? formatRFSNo(rfsNumber, poDate) : "N/A"}</span>
             </div>
             <div className="text-xs font-mono">
               <span className="text-gray-400">PO No:</span>{" "}
@@ -2193,7 +2268,18 @@ export default function POForm({
             )}
           </div>
         )}
-      </form>
+          </form>
+        </div>
+
+        {/* Right Column: Live Document Preview */}
+        <div className="lg:col-span-6 h-[calc(100vh-200px)] min-h-[500px] sticky top-6 no-print">
+          <DocumentPreview
+            moduleName="po"
+            format="word"
+            data={currentPOData}
+          />
+        </div>
+      </div>
 
       {/* Signature Pad Draw Overlay Modal */}
       {showSignaturePad && (

@@ -10,6 +10,7 @@ import { Search, Plus, Trash2, Edit3, Eye, FileText, X, Calculator, PlusCircle }
 import { exportWordWithTemplate, exportExcelWithTemplate } from "../utils/templateExport";
 import { ExportWordButton, CreateButton } from "./SharedButtons";
 import { TableSkeleton } from "./ui/Skeleton";
+import DocumentPreview from "./DocumentPreview";
 
 interface CanvassModuleProps {
   currentUser: User;
@@ -91,6 +92,17 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
     fetchSheets();
   }, []);
 
+  useEffect(() => {
+    if (isModalOpen) {
+      window.dispatchEvent(new CustomEvent("smei-editor-opened"));
+    } else {
+      window.dispatchEvent(new CustomEvent("smei-editor-closed"));
+    }
+    return () => {
+      window.dispatchEvent(new CustomEvent("smei-editor-closed"));
+    };
+  }, [isModalOpen]);
+
   // Auto-calculated computations live based on form inputs
   const supplierCalculations = useMemo(() => {
     return suppliers.map((s) => {
@@ -145,6 +157,54 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
       );
     });
   }, [sheets, search]);
+
+  const currentCanvassData = useMemo<CanvassSheet>(() => {
+    return {
+      id: selectedSheet?.id || "temp-canvass-id",
+      canvassNumber,
+      canvassDate,
+      supplierName: recommended.name,
+      address: "",
+      contactPerson: "",
+      phoneNumber: "",
+      email: "",
+      items: parts.map(p => ({
+        id: p.id,
+        item: p.description,
+        specification: "",
+        quantity: 1,
+        unit: "",
+        supplierAPrice: Number(p.prices[suppliers[0]?.id]) || 0,
+        supplierBPrice: Number(p.prices[suppliers[1]?.id]) || 0,
+        supplierCPrice: Number(p.prices[suppliers[2]?.id]) || 0,
+        selectedSupplier: recommended.name as any,
+        remarks: ""
+      })),
+      lowestPrice: recommended.total,
+      recommendedSupplier: recommended.name,
+      totalCost: recommended.total,
+      category,
+      plateNo,
+      remarks,
+      requestedBy: preparedBy,
+      preparedByPosition,
+      checkedBy,
+      checkedByPosition,
+      verifiedBy,
+      verifiedByPosition,
+      approvedBy,
+      approvedByPosition,
+      shops: suppliers,
+      parts: parts,
+      created_by: selectedSheet?.created_by || currentUser.fullName,
+      createdAt: selectedSheet?.createdAt || new Date().toISOString(),
+      updatedAt: selectedSheet?.updatedAt || new Date().toISOString()
+    };
+  }, [
+    selectedSheet, canvassNumber, canvassDate, recommended, category, plateNo, remarks,
+    preparedBy, preparedByPosition, checkedBy, checkedByPosition, verifiedBy, verifiedByPosition,
+    approvedBy, approvedByPosition, suppliers, parts, currentUser
+  ]);
 
   // Open Modal Dialog
   const handleOpenModal = async (sheet: CanvassSheet | null = null, edit = false) => {
@@ -678,116 +738,137 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
         </div>
       </div>
 
-      {/* Main Table */}
-      <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="bg-red-50/20 text-gray-600 border-b border-gray-100 text-[11px] font-bold uppercase tracking-wider">
-              <th className="py-4 px-6">Canvass Number</th>
-              <th className="py-4 px-6">Canvass Date</th>
-              <th className="py-4 px-6">Primary Supplier</th>
-              <th className="py-4 px-6">Recommended Supplier</th>
-              <th className="py-4 px-6 text-right font-mono">Lowest Price (with VAT)</th>
-              <th className="py-4 px-6 text-center">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <TableSkeleton rows={5} columns={6} />
-            ) : filteredSheets.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="py-12 text-center text-gray-400">
-                  No Canvass Sheets found.
-                </td>
-              </tr>
-            ) : (
-              filteredSheets.map((sheet, idx) => (
-                <tr
-                  key={sheet.id}
-                  onClick={() => setActiveSheetId(sheet.id)}
-                  onDoubleClick={() => handleOpenModal(sheet, false)}
-                  className={`cursor-pointer transition-all border-b border-gray-50/60 group ${
-                    activeSheetId === sheet.id
-                      ? "bg-red-50/70 border-l-4 border-l-smei-crimson font-medium"
-                      : idx % 2 === 1
-                      ? "bg-gray-50/30 hover:bg-red-50/30"
-                      : "bg-white hover:bg-red-50/30"
-                  }`}
-                  title="Double-click to View details"
-                >
-                  <td className="py-3 px-6 font-mono font-bold text-smei-darkred">
-                    <div className="flex items-center gap-2">
-                      {activeSheetId === sheet.id && (
-                        <div className="w-1.5 h-1.5 bg-smei-crimson rounded-full animate-pulse shrink-0" />
-                      )}
-                      <span>{sheet.canvassNumber}</span>
-                    </div>
-                  </td>
-                  <td className="py-3 px-6 text-gray-500 font-mono">{sheet.canvassDate}</td>
-                  <td className="py-3 px-6 font-semibold text-gray-800">{sheet.supplierName}</td>
-                  <td className="py-3 px-6 font-semibold text-emerald-700 text-xs">
-                    <span className="bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                      {sheet.recommendedSupplier}
-                    </span>
-                  </td>
-                  <td className="py-3 px-6 text-right font-mono font-bold text-emerald-600">
-                    {new Intl.NumberFormat("en-PH", {
-                      style: "currency",
-                      currency: "PHP",
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    }).format(sheet.lowestPrice)}
-                  </td>
-                  <td className="py-3 px-6 text-center" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
-                    <div className="flex items-center justify-center gap-1.5">
-                      <button
-                        onClick={() => handleOpenModal(sheet, false)}
-                        className="p-1 hover:bg-red-50 hover:text-smei-crimson text-gray-400 rounded transition-all"
-                        title="View details"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
-
-                      {isAuthorized && (
-                        <button
-                          onClick={() => handleOpenModal(sheet, true)}
-                          className="p-1 hover:bg-blue-50 hover:text-blue-600 text-gray-400 rounded transition-all"
-                          title="Edit"
-                        >
-                          <Edit3 className="w-4 h-4" />
-                        </button>
-                      )}
-
-                      <button
-                        onClick={() => handleExport(sheet, "word")}
-                        className="p-1 hover:bg-indigo-50 hover:text-indigo-600 text-gray-400 rounded transition-all"
-                        title="Export to Word"
-                      >
-                        <FileText className="w-4 h-4" />
-                      </button>
-
-                      {isAuthorized && (
-                        <button
-                          onClick={() => handleDelete(sheet.id, sheet.canvassNumber)}
-                          className="p-1 hover:bg-rose-50 hover:text-rose-600 text-gray-400 rounded transition-all"
-                          title="Delete Canvass"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                  </td>
+      {/* Split Layout for Canvass Grid and Live Preview */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start p-6">
+        {/* Left Column: Canvass Table */}
+        <div className="lg:col-span-5 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[calc(100vh-280px)] min-h-[500px]">
+          <div className="overflow-x-auto flex-1 overflow-y-auto">
+            <table className="w-full text-left border-collapse">
+              <thead className="sticky top-0 bg-white z-10 shadow-sm">
+                <tr className="bg-red-50/20 text-gray-600 border-b border-gray-100 text-[11px] font-bold uppercase tracking-wider">
+                  <th className="py-4 px-6">Canvass Number</th>
+                  <th className="py-4 px-6">Canvass Date</th>
+                  <th className="py-4 px-6">Primary Supplier</th>
+                  <th className="py-4 px-6">Recommended Supplier</th>
+                  <th className="py-4 px-6 text-right font-mono">Lowest Price (with VAT)</th>
+                  <th className="py-4 px-6 text-center">Actions</th>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <TableSkeleton rows={5} columns={6} />
+                ) : filteredSheets.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-12 text-center text-gray-400">
+                      No Canvass Sheets found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredSheets.map((sheet, idx) => (
+                    <tr
+                      key={sheet.id}
+                      onClick={() => setActiveSheetId(sheet.id)}
+                      onDoubleClick={() => handleOpenModal(sheet, false)}
+                      className={`cursor-pointer transition-all border-b border-gray-50/60 group ${
+                        activeSheetId === sheet.id
+                          ? "bg-red-50/70 border-l-4 border-l-smei-crimson font-medium"
+                          : idx % 2 === 1
+                          ? "bg-gray-50/30 hover:bg-red-50/30"
+                          : "bg-white hover:bg-red-50/30"
+                      }`}
+                      title="Double-click to View details"
+                    >
+                      <td className="py-3 px-6 font-mono font-bold text-smei-darkred">
+                        <div className="flex items-center gap-2">
+                          {activeSheetId === sheet.id && (
+                            <div className="w-1.5 h-1.5 bg-smei-crimson rounded-full animate-pulse shrink-0" />
+                          )}
+                          <span>{sheet.canvassNumber}</span>
+                        </div>
+                      </td>
+                      <td className="py-3 px-6 text-gray-500 font-mono">{sheet.canvassDate}</td>
+                      <td className="py-3 px-6 font-semibold text-gray-800">{sheet.supplierName}</td>
+                      <td className="py-3 px-6 font-semibold text-emerald-700 text-xs">
+                        <span className="bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                          {sheet.recommendedSupplier}
+                        </span>
+                      </td>
+                      <td className="py-3 px-6 text-right font-mono font-bold text-emerald-600">
+                        {new Intl.NumberFormat("en-PH", {
+                          style: "currency",
+                          currency: "PHP",
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        }).format(sheet.lowestPrice)}
+                      </td>
+                      <td className="py-3 px-6 text-center" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => handleOpenModal(sheet, false)}
+                            className="p-1 hover:bg-red-50 hover:text-smei-crimson text-gray-400 rounded transition-all"
+                            title="View details"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+
+                          {isAuthorized && (
+                            <button
+                              onClick={() => handleOpenModal(sheet, true)}
+                              className="p-1 hover:bg-blue-50 hover:text-blue-600 text-gray-400 rounded transition-all"
+                              title="Edit"
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </button>
+                          )}
+
+                          <button
+                            onClick={() => handleExport(sheet, "word")}
+                            className="p-1 hover:bg-indigo-50 hover:text-indigo-600 text-gray-400 rounded transition-all"
+                            title="Export to Word"
+                          >
+                            <FileText className="w-4 h-4" />
+                          </button>
+
+                          {isAuthorized && (
+                            <button
+                              onClick={() => handleDelete(sheet.id, sheet.canvassNumber)}
+                              className="p-1 hover:bg-rose-50 hover:text-rose-600 text-gray-400 rounded transition-all"
+                              title="Delete Canvass"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Right Column: Live Document Preview */}
+        <div className="lg:col-span-7 h-[calc(100vh-280px)] min-h-[500px] sticky top-6">
+          {sheets.find((s) => s.id === activeSheetId) ? (
+            <DocumentPreview
+              moduleName="canvass"
+              format="excel"
+              data={sheets.find((s) => s.id === activeSheetId)}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full bg-slate-50 border border-slate-200 border-dashed rounded-xl p-8 text-slate-400">
+              <FileText className="w-12 h-12 text-slate-300 mb-2 animate-pulse" />
+              <p className="text-sm font-medium">Select a canvass sheet to display live preview</p>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Rebuilt, High-Fidelity Modal Dialog */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 flex items-center justify-center p-4 backdrop-blur-xs">
-          <div className="bg-white rounded-xl shadow-xl border border-gray-100 w-full max-w-6xl overflow-hidden transition-all scale-100">
+          <div className="bg-white rounded-xl shadow-xl border border-gray-100 w-full max-w-7xl overflow-hidden transition-all scale-100">
             <div className="bg-smei-crimson text-white px-6 py-4 flex items-center justify-between">
               <div>
                 <h3 className="text-base font-bold uppercase tracking-wide">
@@ -800,7 +881,10 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-6 max-h-[80vh] overflow-y-auto">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 max-h-[80vh] overflow-y-auto">
+              {/* Left Column: Form Editor */}
+              <div className="lg:col-span-6">
+                <form onSubmit={handleSubmit} className="space-y-6">
               {errors.server && (
                 <div className="bg-rose-50 border-l-4 border-rose-500 text-rose-700 text-xs p-3 rounded-md font-medium">
                   {errors.server}
@@ -1378,7 +1462,18 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
                   </button>
                 )}
               </div>
-            </form>
+                </form>
+              </div>
+
+              {/* Right Column: Live Document Preview */}
+              <div className="lg:col-span-6 h-[450px] lg:h-[70vh] sticky top-0">
+                <DocumentPreview
+                  moduleName="canvass"
+                  format="excel"
+                  data={currentCanvassData}
+                />
+              </div>
+            </div>
           </div>
         </div>
       )}

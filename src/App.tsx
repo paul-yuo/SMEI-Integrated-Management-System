@@ -68,6 +68,42 @@ export default function App() {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isOperationsOpen, setIsOperationsOpen] = useState(true);
+
+  // Track and automatically collapse sidebar for document editors
+  const previousSidebarStateRef = React.useRef<boolean>(false);
+  const activeEditorsCountRef = React.useRef<number>(0);
+  const isSidebarCollapsedRef = React.useRef(isSidebarCollapsed);
+
+  React.useEffect(() => {
+    isSidebarCollapsedRef.current = isSidebarCollapsed;
+  }, [isSidebarCollapsed]);
+
+  React.useEffect(() => {
+    const handleEditorOpened = () => {
+      activeEditorsCountRef.current += 1;
+      if (activeEditorsCountRef.current === 1) {
+        // First editor opened, remember user's manual state and collapse
+        previousSidebarStateRef.current = isSidebarCollapsedRef.current;
+        setIsSidebarCollapsed(true);
+      }
+    };
+
+    const handleEditorClosed = () => {
+      activeEditorsCountRef.current = Math.max(0, activeEditorsCountRef.current - 1);
+      if (activeEditorsCountRef.current === 0) {
+        // All editors closed, restore original state
+        setIsSidebarCollapsed(previousSidebarStateRef.current);
+      }
+    };
+
+    window.addEventListener("smei-editor-opened", handleEditorOpened);
+    window.addEventListener("smei-editor-closed", handleEditorClosed);
+
+    return () => {
+      window.removeEventListener("smei-editor-opened", handleEditorOpened);
+      window.removeEventListener("smei-editor-closed", handleEditorClosed);
+    };
+  }, []);
   
   const { theme, toggleTheme } = useTheme();
 

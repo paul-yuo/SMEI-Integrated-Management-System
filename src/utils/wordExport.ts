@@ -3,6 +3,7 @@ import Docxtemplater from "docxtemplater";
 import { saveAs } from "file-saver";
 import { PurchaseOrder } from "../types";
 import { exportWordWithTemplate } from "./templateExport";
+import { formatRFSNo } from "./templateMapping";
 
 // Reusable currency helper supporting dynamic currency symbols and preventing cell wrapping
 export const formatCurrency = (val: number | string | undefined | null, symbol: string = "₱"): string => {
@@ -191,7 +192,7 @@ export const exportPOToWord = async (po: PurchaseOrder) => {
   }
 
   // Derive RFS No. dynamically
-  const rfsNo = po.poNumber.split("-").pop() || "10672";
+  const rfsNo = formatRFSNo(po.rfsNumber || po.poNumber.split("-").pop() || "10672", po.poDate);
 
   // Selected or default currency symbol
   const symbol = po.currencySymbol || "₱";

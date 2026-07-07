@@ -10,6 +10,7 @@ import { ExcelTemplateDownloadButton, exportPOToExcel } from "./ExcelIO";
 import { exportPOToWord } from "../utils/wordExport";
 import { TableSkeleton } from "./ui/Skeleton";
 import { ExportWordButton } from "./SharedButtons";
+import DocumentPreview from "./DocumentPreview";
 
 interface POListProps {
   pos: PurchaseOrder[];
@@ -322,49 +323,68 @@ export default function POList({
         </div>
       </div>
 
-      {/* Main PO Grid List */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
-        <div className="overflow-x-auto overflow-y-visible">
-          <table id="smei-po-table" className="w-full text-left border-collapse min-w-[1000px]">
-            <thead className="sticky top-0 bg-gray-50 z-10 shadow-sm">
-              <tr className="text-gray-500 text-xs uppercase tracking-wider font-semibold border-b border-gray-100">
-                <th className="py-4 px-6 font-display whitespace-nowrap">PO Number</th>
-                <th className="py-4 px-6 font-display whitespace-nowrap">Supplier</th>
-                <th className="py-4 px-6 font-display whitespace-nowrap">Purchase Category</th>
-                <th className="py-4 px-6 font-display whitespace-nowrap">Creation Date</th>
-                <th className="py-4 px-6 font-display text-right whitespace-nowrap">Gross Total Amount</th>
-                <th className="py-4 px-6 font-display whitespace-nowrap">Workflow Status</th>
-                <th className="py-4 px-6 font-display whitespace-nowrap">Prepared By</th>
-                <th className="py-4 px-6 font-display text-center whitespace-nowrap">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 text-xs">
-              {isExporting ? (
-                <TableSkeleton rows={5} columns={8} />
-              ) : filteredPOs.length > 0 ? (
-                filteredPOs.map((po, index) => (
-                  <PORow
-                    key={po.id}
-                    po={po}
-                    index={index}
-                    selectedPOId={selectedPOId}
-                    statusColors={statusColors}
-                    isAdmin={isAdmin}
-                    isStaff={isStaff}
-                    setSelectedPOId={setSelectedPOId}
-                    onSelectPO={onSelectPO}
-                    onDeletePO={onDeletePO}
-                  />
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={8} className="py-12 text-center text-gray-400 font-sans">
-                    No purchase orders match your filter criteria.
-                  </td>
+      {/* Split Layout for Grid and Live Preview */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left column: List table */}
+        <div className="lg:col-span-5 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[calc(100vh-280px)] min-h-[500px]">
+          <div className="overflow-x-auto overflow-y-auto flex-1">
+            <table id="smei-po-table" className="w-full text-left border-collapse min-w-[600px]">
+              <thead className="sticky top-0 bg-gray-50 z-10 shadow-sm">
+                <tr className="text-gray-500 text-xs uppercase tracking-wider font-semibold border-b border-gray-100">
+                  <th className="py-4 px-6 font-display whitespace-nowrap">PO Number</th>
+                  <th className="py-4 px-6 font-display whitespace-nowrap">Supplier</th>
+                  <th className="py-4 px-6 font-display whitespace-nowrap">Purchase Category</th>
+                  <th className="py-4 px-6 font-display whitespace-nowrap">Creation Date</th>
+                  <th className="py-4 px-6 font-display text-right whitespace-nowrap">Gross Total Amount</th>
+                  <th className="py-4 px-6 font-display whitespace-nowrap">Workflow Status</th>
+                  <th className="py-4 px-6 font-display whitespace-nowrap">Prepared By</th>
+                  <th className="py-4 px-6 font-display text-center whitespace-nowrap">Actions</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-gray-100 text-xs">
+                {isExporting ? (
+                  <TableSkeleton rows={5} columns={8} />
+                ) : filteredPOs.length > 0 ? (
+                  filteredPOs.map((po, index) => (
+                    <PORow
+                      key={po.id}
+                      po={po}
+                      index={index}
+                      selectedPOId={selectedPOId}
+                      statusColors={statusColors}
+                      isAdmin={isAdmin}
+                      isStaff={isStaff}
+                      setSelectedPOId={setSelectedPOId}
+                      onSelectPO={onSelectPO}
+                      onDeletePO={onDeletePO}
+                    />
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={8} className="py-12 text-center text-gray-400 font-sans">
+                      No purchase orders match your filter criteria.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Right column: Live Document Preview */}
+        <div className="lg:col-span-7 h-[calc(100vh-280px)] min-h-[500px] sticky top-6">
+          {pos.find((p) => p.id === selectedPOId) ? (
+            <DocumentPreview
+              moduleName="po"
+              format="word"
+              data={pos.find((p) => p.id === selectedPOId)}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full bg-slate-50 border border-slate-200 border-dashed rounded-xl p-8 text-slate-400">
+              <FileText className="w-12 h-12 text-slate-300 mb-2 animate-pulse" />
+              <p className="text-sm font-medium">Select a purchase order to display live preview</p>
+            </div>
+          )}
         </div>
       </div>
     </div>

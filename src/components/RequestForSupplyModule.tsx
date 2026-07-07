@@ -10,6 +10,8 @@ import { Search, Plus, Filter, Calendar, FileText, ArrowUpDown, Trash2, Edit3, E
 import { exportWordWithTemplate, exportExcelWithTemplate } from "../utils/templateExport";
 import { ExportExcelButton, CreateButton } from "./SharedButtons";
 import { TableSkeleton } from "./ui/Skeleton";
+import DocumentPreview from "./DocumentPreview";
+import { formatRFSNo } from "../utils/templateMapping";
 
 interface RFSModuleProps {
   currentUser: User;
@@ -106,6 +108,44 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
   useEffect(() => {
     setCurrentPage(1);
   }, [search, statusFilter, departmentFilter, modeFilter]);
+
+  useEffect(() => {
+    if (isModalOpen) {
+      window.dispatchEvent(new CustomEvent("smei-editor-opened"));
+    } else {
+      window.dispatchEvent(new CustomEvent("smei-editor-closed"));
+    }
+    return () => {
+      window.dispatchEvent(new CustomEvent("smei-editor-closed"));
+    };
+  }, [isModalOpen]);
+
+  const currentRFSData = useMemo<RequestForSupply | null>(() => {
+    return {
+      id: selectedRequest?.id || "temp-rfs-id",
+      rfsNumber,
+      dateRequested,
+      dueDate,
+      department,
+      departmentOthers: department === "Others" ? departmentOthers : "",
+      controlNumber,
+      purchaseOrderNumber,
+      items,
+      status,
+      modeOfRequest,
+      purpose,
+      requestedBy,
+      verifiedBy,
+      approvedBy,
+      createdAt: selectedRequest?.createdAt || new Date().toISOString(),
+      updatedAt: selectedRequest?.updatedAt || new Date().toISOString(),
+      created_by: selectedRequest?.created_by || currentUser.fullName,
+    };
+  }, [
+    selectedRequest, rfsNumber, dateRequested, dueDate, department, departmentOthers,
+    controlNumber, purchaseOrderNumber, items, status, modeOfRequest, purpose,
+    requestedBy, verifiedBy, approvedBy, currentUser
+  ]);
 
   // Open modal for Create/View/Edit
   const handleOpenModal = async (req: RequestForSupply | null = null, edit = false) => {
@@ -324,13 +364,14 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
 
   // Template-based Export
   const handleExport = async (req: RequestForSupply, format: "word" | "excel") => {
+    const formattedRFS = formatRFSNo(req.rfsNumber, req.dateRequested);
     const exportData = {
-      RFS_NO: req.rfsNumber,
+      RFS_NO: formattedRFS,
       REQUEST_DATE: req.dateRequested,
       DUE_DATE: req.dueDate || "",
       RECEIVED_DATE: req.dueDate || "", // Map to template placeholder
       DEPARTMENT: req.department === "Others" ? req.departmentOthers : req.department,
-      CONTROL_NO: req.rfsNumber,
+      CONTROL_NO: formattedRFS,
       PO_NO: req.purchaseOrderNumber || "N/A",
       STATUS: req.status,
       MODE: req.modeOfRequest,
@@ -356,9 +397,9 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
 
     if (format === "word") {
       // Pass data to Docxtemplater containing loop array "items"
-      await exportWordWithTemplate("RFS_TEMPLATE.docx", { ...exportData, items: exportItems }, `${req.rfsNumber}_SMEI_RFS.docx`);
+      await exportWordWithTemplate("RFS_TEMPLATE.docx", { ...exportData, items: exportItems }, `${formattedRFS}_SMEI_RFS.docx`);
     } else {
-      await exportExcelWithTemplate("RFS_TEMPLATE.xlsx", exportData, "items", exportItems, `${req.rfsNumber}_SMEI_RFS.xlsx`);
+      await exportExcelWithTemplate("RFS_TEMPLATE.xlsx", exportData, "items", exportItems, `${formattedRFS}_SMEI_RFS.xlsx`);
     }
   };
 
@@ -470,10 +511,13 @@ const handleExportExcel = async () => {
         </div>
       </div>
 
-      {/* Main Table */}
-      <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
-        <table className="w-full text-left border-collapse min-w-[1000px]">
-          <thead>
+      {/* Split Layout for RFS Grid and Live Preview */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start p-6">
+        {/* Left Column: RFS Table */}
+        <div className="lg:col-span-5 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[calc(100vh-280px)] min-h-[500px]">
+          <div className="overflow-x-auto flex-1 overflow-y-auto">
+            <table className="w-full text-left border-collapse min-w-[500px]">
+          <thead className="sticky top-0 bg-white z-10 shadow-sm">
             <tr className="bg-red-50/20 text-gray-600 border-b border-gray-100 text-[11px] font-bold uppercase tracking-wider">
               <th className="py-4 px-6">Control No.</th>
               <th className="py-4 px-6">Department</th>
@@ -516,7 +560,7 @@ const handleExportExcel = async () => {
                       {selectedRFS?.id === req.id && (
                         <div className="w-1.5 h-1.5 bg-smei-crimson rounded-full animate-pulse shrink-0" />
                       )}
-                      <span>{req.rfsNumber}</span>
+                      <span>{formatRFSNo(req.rfsNumber, req.dateRequested)}</span>
                     </div>
                   </td>
                   <td className="py-3 px-6 text-gray-700 font-semibold text-xs">
@@ -558,7 +602,7 @@ const handleExportExcel = async () => {
 
                       {isAuthorized && (
                         <button
-                          onClick={() => handleDelete(req.id, req.rfsNumber)}
+                          onClick={() => handleDelete(req.id, formatRFSNo(req.rfsNumber, req.dateRequested))}
                           className="p-1 hover:bg-rose-50 hover:text-rose-600 text-gray-400 rounded transition-all"
                           title="Delete RFS"
                         >
@@ -571,13 +615,31 @@ const handleExportExcel = async () => {
               ))
             )}
           </tbody>
-        </table>
+            </table>
+          </div>
+        </div>
+
+        {/* Right Column: Live Document Preview */}
+        <div className="lg:col-span-7 h-[calc(100vh-280px)] min-h-[500px] sticky top-6">
+          {selectedRFS ? (
+            <DocumentPreview
+              moduleName="rfs"
+              format="excel"
+              data={selectedRFS}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full bg-slate-50 border border-slate-200 border-dashed rounded-xl p-8 text-slate-400">
+              <FileText className="w-12 h-12 text-slate-300 mb-2 animate-pulse" />
+              <p className="text-sm font-medium">Select an RFS document to display live preview</p>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* RFS View/Create/Edit Modal Dialog */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 flex items-center justify-center p-4 backdrop-blur-xs">
-          <div className="bg-white rounded-xl shadow-xl border border-gray-100 w-full max-w-5xl overflow-hidden transition-all scale-100">
+          <div className="bg-white rounded-xl shadow-xl border border-gray-100 w-full max-w-7xl overflow-hidden transition-all scale-100">
             <div className="bg-smei-crimson text-white px-6 py-4 flex items-center justify-between">
               <div>
                 <h3 className="text-base font-bold uppercase tracking-wide">
@@ -590,7 +652,10 @@ const handleExportExcel = async () => {
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 max-h-[80vh] overflow-y-auto">
+              {/* Left Column: Form Editor */}
+              <div className="lg:col-span-6">
+                <form onSubmit={handleSubmit} className="space-y-4">
               {errors.server && (
                 <div className="bg-rose-50 border-l-4 border-rose-500 text-rose-700 text-xs p-3 rounded-md font-medium">
                   {errors.server}
@@ -931,7 +996,20 @@ const handleExportExcel = async () => {
                   </button>
                 )}
               </div>
-            </form>
+                </form>
+              </div>
+
+              {/* Right Column: Live Document Preview */}
+              <div className="lg:col-span-6 h-[450px] lg:h-[70vh] sticky top-0">
+                {currentRFSData && (
+                  <DocumentPreview
+                    moduleName="rfs"
+                    format="excel"
+                    data={currentRFSData}
+                  />
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}
