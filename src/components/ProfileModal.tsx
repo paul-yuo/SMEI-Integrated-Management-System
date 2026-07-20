@@ -170,9 +170,11 @@ export default function ProfileModal({
   const handleFile = (file: File) => {
     if (!file) return;
 
-    // Type validation
+    // Type & Extension validation
     const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
-    if (!allowedTypes.includes(file.type)) {
+    const allowedExtensions = ["jpg", "jpeg", "png", "webp"];
+    const ext = file.name.split(".").pop()?.toLowerCase() || "";
+    if (!allowedTypes.includes(file.type) && !allowedExtensions.includes(ext)) {
       showToast("Only JPG, JPEG, PNG, and WEBP files are supported.", "error");
       return;
     }

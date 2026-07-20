@@ -483,7 +483,7 @@ export default function SupplierSummaryReport({ pos, suppliers, currentUser }: S
             className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-semibold px-4 py-2.5 rounded-xl shadow-md transition-all text-sm"
           >
             <Printer className="w-4 h-4" />
-            <span>Export PDF</span>
+            <span>Print</span>
           </button>
           <button
             onClick={() => exportReportToWord(itemsWithRunningBalance, grandTotal, currentUser.fullName)}

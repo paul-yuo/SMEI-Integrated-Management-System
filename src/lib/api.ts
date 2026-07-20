@@ -7,6 +7,8 @@ import { User, Supplier, PurchaseOrder, AuditLog, Notification, POStatus, POItem
 
 const TOKEN_KEY = "smei_jwt_token";
 
+let activeRefreshPromise: Promise<{ user: User; token?: string }> | null = null;
+
 // Get token from local storage
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -84,8 +86,25 @@ export const api = {
     }
   },
 
-  async getCurrentUser(): Promise<{ user: User }> {
-    return apiFetch<{ user: User }>("/api/auth/me");
+  async getCurrentUser(): Promise<{ user: User; token?: string }> {
+    if (activeRefreshPromise) {
+      return activeRefreshPromise;
+    }
+    
+    activeRefreshPromise = apiFetch<{ user: User; token?: string }>("/api/auth/me")
+      .then((data) => {
+        if (data.token) {
+          setToken(data.token);
+        }
+        activeRefreshPromise = null;
+        return data;
+      })
+      .catch((err) => {
+        activeRefreshPromise = null;
+        throw err;
+      });
+      
+    return activeRefreshPromise;
   },
 
   // Users Management (Admin Only)
@@ -181,6 +200,10 @@ export const api = {
     return apiFetch<PurchaseOrder[]>("/api/pos");
   },
 
+  async getNextPONumber(): Promise<{ nextNumber: string }> {
+    return apiFetch<{ nextNumber: string }>("/api/pos/next-number");
+  },
+
   async createPO(poData: Partial<PurchaseOrder>): Promise<PurchaseOrder> {
     return apiFetch<PurchaseOrder>("/api/pos", {
       method: "POST",
@@ -241,11 +264,12 @@ export const api = {
       username: l.username,
       role: l.role,
       action: l.action,
-      date: l.timestamp.split("T")[0],
-      time: new Date(l.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      date: l.timestamp ? l.timestamp.split("T")[0] : "",
+      time: l.timestamp ? new Date(l.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "",
       oldValue: l.old_value,
       newValue: l.new_value,
-      ipAddress: l.ip_address
+      ipAddress: l.ip_address,
+      timestamp: l.timestamp
     }));
   },
 

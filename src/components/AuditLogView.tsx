@@ -41,7 +41,11 @@ export default function AuditLogs({ auditLogs, isAdmin, onClearLogs }: AuditLogs
 
   const formatTimestamp = (isoString: string) => {
     try {
+      if (!isoString) return "";
       const d = new Date(isoString);
+      if (isNaN(d.getTime())) {
+        return isoString;
+      }
       return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
     } catch {
       return isoString;

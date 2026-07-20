@@ -112,20 +112,19 @@ return (
               <p className="text-sm font-semibold tracking-wider uppercase text-red-200 mt-1">
                 Southcoast Metal Enterprise, Inc.
               </p>
+              <div className="flex items-center gap-2 mt-4 bg-black/20 backdrop-blur-sm py-1.5 px-3 rounded-lg w-fit border border-emerald-500/20">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <span className="text-[11px] font-mono font-medium tracking-wider text-emerald-400 uppercase">
+                  SMEI - CAVITE, PH
+                </span>
+              </div>
             </div>
           </div>
 
-          <div className="my-8 md:my-0 space-y-3">
-            <p className="text-xs text-red-100/90 leading-relaxed font-sans">
-              Welcome to the SMEI Purchase Order Management System (POMS). Securely submit, review, verify, and approve procurement contracts for Cavite EPZA industrial assemblies.
-            </p>
-            <div className="flex items-center gap-2 text-xs text-red-200/80 font-mono">
-              <span className="inline-block w-2 h-2 rounded-full bg-green-400 animate-ping" />
-              <span>SMEI Terminal - CAVITE, PH</span>
-            </div>
-          </div>
-
-          <div className="text-[10px] text-red-300 font-mono border-t border-red-800/60 pt-4">
+          <div className="text-[10px] text-red-300 font-mono border-t border-red-800/60 pt-4 mt-auto">
             Authorized Personnel Only • POMS v3.2.0 (Durable DB)
           </div>
         </div>

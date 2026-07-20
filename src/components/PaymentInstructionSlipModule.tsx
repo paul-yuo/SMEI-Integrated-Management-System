@@ -4,13 +4,13 @@
  */
 
 import React, { useState, useEffect, useMemo } from "react";
-import { PaymentInstructionSlip, User, UserRole } from "../types";
+import { PaymentInstructionSlip, PaymentEntry, User, UserRole } from "../types";
 import { api } from "../lib/api";
 import { Search, Plus, Filter, Calendar, FileText, ArrowUpDown, Trash2, Edit3, Eye, FileSpreadsheet, X, Download } from "lucide-react";
 import { exportWordWithTemplate, exportExcelWithTemplate } from "../utils/templateExport";
-import { ExportExcelButton, CreateButton } from "./SharedButtons";
+import { wrapRemarks, mapPISData } from "../utils/templateMapping";
+import { ExportExcelButton, CreateButton, ExportPdfButton } from "./SharedButtons";
 import { TableSkeleton } from "./ui/Skeleton";
-import DocumentPreview from "./DocumentPreview";
 
 interface PISModuleProps {
   currentUser: User;
@@ -60,6 +60,9 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
   const [acceptedByPosition, setAcceptedByPosition] = useState("");
   const [acceptedByDate, setAcceptedByDate] = useState("");
   const [status, setStatus] = useState<"Draft" | "Pending" | "Approved" | "Released" | "Cancelled">("Draft");
+  const [payments, setPayments] = useState<PaymentEntry[]>([
+    { id: "1", paymentPurpose: "", gross: 0, ewt: 0, total: 0 }
+  ]);
 
   // Error States
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -77,8 +80,13 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
         setActiveSlipId(data[data.length - 1].id);
         setSelectedSlip(data[data.length - 1]);
       }
-    } catch (err) {
-      console.error("Error fetching PIS slips:", err);
+    } catch (err: any) {
+      const errMsg = err?.message || String(err);
+      if (errMsg.includes("Session expired") || errMsg.includes("unauthorized") || errMsg.includes("token")) {
+        console.warn("PIS fetch unauthorized or session expired (handled globally):", errMsg);
+      } else {
+        console.error("Error fetching PIS slips:", errMsg);
+      }
     } finally {
       setLoading(false);
     }
@@ -88,12 +96,23 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
     fetchSlips();
   }, []);
 
-  // Auto-calculate total and set amount whenever gross or ewt changes
+  // Auto-calculate total and set amount whenever payments changes
   useEffect(() => {
-    const computedTotal = Number((gross - (gross * (ewt / 100))).toFixed(2));
-    setTotal(computedTotal);
-    setAmount(computedTotal);
-  }, [gross, ewt]);
+    let computedGrossSum = 0;
+    let computedEwtSum = 0;
+    let computedTotalSum = 0;
+
+    payments.forEach((p) => {
+      computedGrossSum += Number(p.gross) || 0;
+      computedEwtSum += Number(p.ewt) || 0;
+      computedTotalSum += Number(p.total) || 0;
+    });
+
+    setGross(Number(computedGrossSum.toFixed(2)));
+    setEwt(Number(computedEwtSum.toFixed(2)));
+    setTotal(Number(computedTotalSum.toFixed(2)));
+    setAmount(Number(computedTotalSum.toFixed(2)));
+  }, [payments]);
 
   // Filter & Search Logic
   const filteredSlips = useMemo(() => {
@@ -161,6 +180,7 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
       acceptedByPosition,
       acceptedByDate,
       status,
+      payments,
       created_by: selectedSlip?.created_by || currentUser.fullName,
       createdAt: selectedSlip?.createdAt || new Date().toISOString()
     };
@@ -168,7 +188,7 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
     selectedSlip, pisNumber, scheduleDate, scheduleTime, ampm, payee, gross, ewt, total, amount,
     currency, currencyOthers, paymentMode, paymentModeOthers, remarks, requestedBy, requestedDate,
     checkedAndVerifiedBy, checkedAndVerifiedByPosition, verifiedBy, verifiedByPosition, verifiedByDate,
-    acceptedBy, acceptedByPosition, acceptedByDate, status, currentUser
+    acceptedBy, acceptedByPosition, acceptedByDate, status, payments, currentUser
   ]);
 
   // Open modal for Create/View/Edit
@@ -202,6 +222,19 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
       setAcceptedByPosition(slip.acceptedByPosition || "");
       setAcceptedByDate(slip.acceptedByDate || "");
       setStatus(slip.status);
+      if (slip.payments && slip.payments.length > 0) {
+        setPayments(slip.payments);
+      } else {
+        setPayments([
+          {
+            id: "1",
+            paymentPurpose: slip.remarks || "Payment Entry",
+            gross: slip.gross !== undefined ? slip.gross : slip.amount,
+            ewt: slip.ewt !== undefined ? slip.ewt : 0,
+            total: slip.total !== undefined ? slip.total : slip.amount
+          }
+        ]);
+      }
     } else {
       setSelectedSlip(null);
       setIsEditMode(true);
@@ -218,6 +251,9 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
       setPaymentMode("Cash");
       setPaymentModeOthers("");
       setRemarks("");
+      setPayments([
+        { id: "1", paymentPurpose: "", gross: 0, ewt: 0, total: 0 }
+      ]);
       setRequestedBy(currentUser.fullName);
       setRequestedDate(new Date().toISOString().split("T")[0]);
       setCheckedAndVerifiedBy("");
@@ -255,9 +291,6 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
     const newErrors: Record<string, string> = {};
     
     if (!payee.trim()) newErrors.payee = "Payee is required.";
-    if (gross === undefined || gross < 0) newErrors.gross = "Gross amount must be zero or a positive value.";
-    if (ewt === undefined || ewt < 0 || ewt > 100) newErrors.ewt = "EWT must be between 0 and 100.";
-    if (amount === undefined || amount < 0) newErrors.amount = "Amount must be zero or a positive value.";
     if (!scheduleDate) newErrors.scheduleDate = "Schedule date is required.";
     if (!pisNumber.trim()) {
       newErrors.pisNumber = "PIS Number is required.";
@@ -267,6 +300,29 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
         newErrors.pisNumber = "Invalid format. Expected: PURC-PIS-YY-### (e.g., PURC-PIS-26-001).";
       }
     }
+
+    // Validate payment entries
+    payments.forEach((p) => {
+      const isPurposeFilled = (p.paymentPurpose || "").trim() !== "";
+      const isGrossFilled = (p.gross || 0) > 0;
+      const isEwtFilled = (p.ewt || 0) > 0;
+
+      // If any part of the payment entry is filled, validate the rest
+      if (isPurposeFilled || isGrossFilled || isEwtFilled) {
+        if (!isPurposeFilled) {
+          newErrors[`paymentPurpose_${p.id}`] = "Payment Purpose is required.";
+        }
+        if (p.gross === undefined || p.gross < 0) {
+          newErrors[`gross_${p.id}`] = "Gross must be zero or positive.";
+        }
+        if (p.ewt === undefined || p.ewt < 0) {
+          newErrors[`ewt_${p.id}`] = "EWT must be zero or positive.";
+        }
+        if (p.gross < p.ewt) {
+          newErrors[`ewt_${p.id}`] = "EWT cannot exceed Gross.";
+        }
+      }
+    });
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
@@ -288,6 +344,7 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
       paymentMode,
       paymentModeOthers: paymentMode === "Others" ? paymentModeOthers : "",
       remarks,
+      payments,
       requestedBy,
       requestedDate,
       checkedAndVerifiedBy,
@@ -333,49 +390,21 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
       console.log("Format:", format);
       console.log("PIS:", slip.pisNumber);
 
-    const formattedAmount = new Intl.NumberFormat("en-PH", {
-      style: "currency",
-      currency: slip.currency === "PHP" ? "PHP" : "USD",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(slip.amount);
+    const remarksText = slip.remarks || "";
+    const remarksLines = wrapRemarks(remarksText, 34);
 
-    const exportData = {
-      PIS_NO: slip.pisNumber,
-      SCHEDULE_DATE: slip.scheduleDate,
-      PAYMENT_DATE: slip.scheduleDate, // Map to template placeholder
-      SCHEDULE_TIME: `${slip.scheduleTime} ${slip.ampm}`,
-      PAYEE: slip.payee,
-      AMOUNT: formattedAmount,
-      GROSS: new Intl.NumberFormat("en-PH", {
-        style: "currency",
-        currency: slip.currency === "Others" ? "PHP" : (slip.currency === "JP Yen" ? "JPY" : slip.currency),
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }).format(slip.gross !== undefined ? slip.gross : slip.amount),
-      EWT: `${slip.ewt !== undefined ? slip.ewt : 0}%`,
-      TOTAL: new Intl.NumberFormat("en-PH", {
-        style: "currency",
-        currency: slip.currency === "Others" ? "PHP" : (slip.currency === "JP Yen" ? "JPY" : slip.currency),
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }).format(slip.total !== undefined ? slip.total : slip.amount),
-      CURRENCY: slip.currency === "Others" ? slip.currencyOthers : slip.currency,
-      PAYMENT_MODE: slip.paymentMode === "Others" ? slip.paymentModeOthers : slip.paymentMode,
-      REMARKS: slip.remarks || "N/A",
-      REQUESTED_BY: slip.requestedBy,
-      REQUESTED_DATE: slip.requestedDate,
-      CHECKED_BY: slip.checkedAndVerifiedBy || "N/A",
-      VERIFIED_BY: slip.verifiedBy || "N/A",
-      ACCEPTED_BY: slip.acceptedBy || "N/A",
-      STATUS: slip.status,
-    };
+    if (remarksLines.length > 5) {
+      alert("Remarks exceed the printable area. Please shorten the Remarks.");
+      return;
+    }
+
+    const exportData = mapPISData(slip);
 
     if (format === "word") {
-      await exportWordWithTemplate("PIS_TEMPLATE.docx", exportData, `${slip.pisNumber}_SMEI_PIS.docx`);
+      await exportWordWithTemplate("PIS_TEMPLATE_WORD.docx", exportData, `${slip.pisNumber}_SMEI_PIS.docx`);
     } else {
       console.log("Calling exportExcelWithTemplate...");
-      await exportExcelWithTemplate("PIS_TEMPLATE.xlsx", exportData, "items", [], `${slip.pisNumber}_SMEI_PIS.xlsx`);
+      await exportExcelWithTemplate("PIS_TEMPLATE.xlsm", exportData, "items", [], `${slip.pisNumber}_SMEI_PIS.xlsm`);
     }
   };
 
@@ -409,88 +438,49 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
     console.log("handleExport finished");
   };
 
+  const handleTriggerPDFExport = async () => {
+    const slipToExport = slips.find((s) => s.id === activeSlipId);
+    if (slipToExport) {
+      try {
+        const { printDocument } = await import("../utils/printDocument");
+        await printDocument("pis", slipToExport);
+      } catch (err: any) {
+        alert("Failed to print: " + (err.message || err));
+      }
+    } else {
+      alert("Please select a PIS first.");
+    }
+  };
+
 
 
   return (
-    <div id="smei-pis-list" className="p-6 md:p-10 space-y-6 max-w-[130rem] mx-auto w-full">
+    <div id="smei-pis-list" className="p-4 md:p-6 space-y-4 max-w-[130rem] mx-auto w-full">
       {/* Upper Action Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800 tracking-tight font-display">Payment Instruction Slips [PIS]</h2>
-          <p className="text-sm text-gray-500 mt-0.5">Manage purchasing payment instructions and financial authorizations</p>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col" id="pis-module-root">
-      {/* Search and Filters Header */}
-      <div className="p-6 border-b border-gray-100 bg-gray-50/50 flex flex-col gap-4">
-        <div className="relative w-full md:w-96">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search PIS Number, Payee, Remarks..."
-            className="pl-9 pr-4 py-2 w-full text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-smei-crimson focus:border-transparent outline-none transition-all"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+          <h2 className="text-xl md:text-2xl font-bold text-gray-800 tracking-tight font-display">Payment Instruction Slips [PIS]</h2>
+          <p className="text-xs md:text-sm text-gray-500 mt-0.5">Manage purchasing payment instructions and financial authorizations</p>
         </div>
 
-        {/* Filter controls and Actions */}
-        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-          <div className="flex flex-wrap gap-2">
-            <div className="w-[180px]">
-              <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Status Filter</label>
-              <select
-                className="w-full text-xs border border-gray-200 rounded-md p-1.5 outline-none bg-white focus:border-smei-crimson"
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-              >
-                <option value="All">All Statuses</option>
-                <option value="Draft">Draft</option>
-                <option value="Pending">Pending</option>
-                <option value="Approved">Approved</option>
-                <option value="Released">Released</option>
-                <option value="Cancelled">Cancelled</option>
-              </select>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4 w-full md:w-auto md:justify-end">
+          {activeSlipId && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-gray-500 uppercase font-mono tracking-wider">Selected:</span>
+              <span className="text-[11px] font-bold font-mono text-smei-crimson bg-red-50 border border-red-200 px-2.5 py-1 rounded-md">
+                {slips.find((s) => s.id === activeSlipId)?.pisNumber || ""}
+              </span>
             </div>
+          )}
 
-            <div className="w-[180px]">
-              <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Currency Filter</label>
-              <select
-                className="w-full text-xs border border-gray-200 rounded-md p-1.5 outline-none bg-white focus:border-smei-crimson"
-                value={currencyFilter}
-                onChange={(e) => setCurrencyFilter(e.target.value)}
-              >
-                <option value="All">All Currencies</option>
-                <option value="PHP">PHP (Pesos)</option>
-                <option value="USD">USD (Dollars)</option>
-                <option value="JP Yen">JP Yen</option>
-                <option value="Others">Others</option>
-              </select>
-            </div>
-
-            <div className="w-[180px]">
-              <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Payment Mode Filter</label>
-              <select
-                className="w-full text-xs border border-gray-200 rounded-md p-1.5 outline-none bg-white focus:border-smei-crimson"
-                value={paymentModeFilter}
-                onChange={(e) => setPaymentModeFilter(e.target.value)}
-              >
-                <option value="All">All Payment Modes</option>
-                <option value="Cash">Cash</option>
-                <option value="Check Crossed">Check Crossed</option>
-                <option value="Check Not Crossed">Check Not Crossed</option>
-                <option value="T/T">T/T (Telegraphic Transfer)</option>
-                <option value="Others">Others</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-end gap-2 w-full md:w-auto ml-auto">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
             <ExportExcelButton
               onClick={handleExportExcel}
               disabled={!activeSlipId}
-              selectedText={slips.find((s) => s.id === activeSlipId)?.pisNumber || ""}
+            />
+            <ExportPdfButton
+              onClick={handleTriggerPDFExport}
+              disabled={!activeSlipId}
             />
             {isAuthorized && (
               <CreateButton onClick={() => handleOpenModal(null)} label="Create PIS" />
@@ -499,138 +489,202 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
         </div>
       </div>
 
-      {/* Split Layout for PIS Grid and Live Preview */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start p-6">
-        {/* Left Column: PIS Table (Expanded to 58.33% / col-span-7 for enterprise screens) */}
-        <div className="lg:col-span-7 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[calc(100vh-280px)] min-h-[500px]">
-          <div className="overflow-x-auto flex-1 overflow-y-auto">
-            <table className="w-full text-left border-collapse min-w-[600px]">
-              <thead className="sticky top-0 bg-white z-10 shadow-sm">
-                <tr className="bg-red-50/20 text-gray-600 border-b border-gray-100 text-[11px] font-bold uppercase tracking-wider">
-                  <th className="py-4 px-6">PIS Number</th>
-                  <th className="py-4 px-6">Payee</th>
-                  <th className="py-4 px-6">Schedule</th>
-                  <th className="py-4 px-6 text-right">Amount</th>
-                  <th className="py-4 px-6">Payment Mode</th>
-                  <th className="py-4 px-6">Status</th>
-                  <th className="py-4 px-6 text-center">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="text-xs">
-                {loading ? (
-                  <TableSkeleton rows={5} columns={7} />
-                ) : paginatedSlips.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="py-12 text-center text-gray-400">
-                      No Payment Instruction Slips found matching filters.
-                    </td>
+      {/* Full Width Layout for PIS Grid */}
+      <div className="w-full flex flex-col gap-4 h-[calc(100vh-170px)] min-h-[650px]">
+        
+        {/* Compressed Search and Filters Board */}
+        <div className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+              {/* Search Keywords */}
+              <div className="space-y-0.5">
+                <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Search Keywords</label>
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="PIS#, payee, remarks..."
+                    className="w-full pl-7.5 pr-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-sans focus:outline-none focus:ring-1 focus:ring-smei-crimson focus:border-transparent focus:bg-white transition-all text-gray-700"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {/* Status Filter */}
+              <div className="space-y-0.5">
+                <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Status</label>
+                <div className="relative">
+                  <Filter className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-gray-400" />
+                  <select
+                    className="w-full pl-7.5 pr-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-sans focus:outline-none focus:ring-1 focus:ring-smei-crimson focus:border-transparent focus:bg-white transition-all text-gray-700"
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                  >
+                    <option value="All">All Statuses</option>
+                    <option value="Draft">Draft</option>
+                    <option value="Pending">Pending</option>
+                    <option value="Approved">Approved</option>
+                    <option value="Released">Released</option>
+                    <option value="Cancelled">Cancelled</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Currency Filter */}
+              <div className="space-y-0.5">
+                <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Currency</label>
+                <div className="relative">
+                  <Filter className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-gray-400" />
+                  <select
+                    className="w-full pl-7.5 pr-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-sans focus:outline-none focus:ring-1 focus:ring-smei-crimson focus:border-transparent focus:bg-white transition-all text-gray-700"
+                    value={currencyFilter}
+                    onChange={(e) => setCurrencyFilter(e.target.value)}
+                  >
+                    <option value="All">All Currencies</option>
+                    <option value="PHP">PHP (Pesos)</option>
+                    <option value="USD">USD (Dollars)</option>
+                    <option value="JP Yen">JP Yen</option>
+                    <option value="Others">Others</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Payment Mode Filter */}
+              <div className="space-y-0.5">
+                <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Payment Mode</label>
+                <div className="relative">
+                  <Filter className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-gray-400" />
+                  <select
+                    className="w-full pl-7.5 pr-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-sans focus:outline-none focus:ring-1 focus:ring-smei-crimson focus:border-transparent focus:bg-white transition-all text-gray-700"
+                    value={paymentModeFilter}
+                    onChange={(e) => setPaymentModeFilter(e.target.value)}
+                  >
+                    <option value="All">All Modes</option>
+                    <option value="Cash">Cash</option>
+                    <option value="Check Crossed">Check Crossed</option>
+                    <option value="Check Not Crossed">Check Not Crossed</option>
+                    <option value="T/T">T/T</option>
+                    <option value="Others">Others</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Table Container */}
+          <div className="flex-1 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
+            <div className="overflow-x-auto flex-1 overflow-y-auto">
+              <table className="w-full text-left border-collapse min-w-[600px]">
+                <thead className="sticky top-0 bg-white z-10 shadow-sm">
+                  <tr className="bg-red-50/20 text-gray-600 border-b border-gray-100 text-[11px] font-bold uppercase tracking-wider">
+                    <th className="py-3.5 px-6">PIS Number</th>
+                    <th className="py-3.5 px-6">Payee</th>
+                    <th className="py-3.5 px-6">Schedule</th>
+                    <th className="py-3.5 px-6 text-right">Amount</th>
+                    <th className="py-3.5 px-6">Payment Mode</th>
+                    <th className="py-3.5 px-6">Status</th>
+                    <th className="py-3.5 px-6 text-center">Actions</th>
                   </tr>
-                ) : (
-                  filteredSlips.map((slip, idx) => (
-                    <tr
-                      key={slip.id}
-                      onClick={() => {
-                          setActiveSlipId(slip.id);
-                          setSelectedSlip(slip);
-                      }}
-                      onDoubleClick={() => handleOpenModal(slip, isAuthorized)}
-                      className={`cursor-pointer transition-all border-b border-gray-50/60 group ${
-                        activeSlipId === slip.id
-                          ? "bg-red-600/20 border-l-4 border-l-smei-crimson font-medium"
-                          : idx % 2 === 1
-                          ? "bg-gray-50/30 hover:bg-red-600/10"
-                          : "bg-white hover:bg-red-600/10"
-                      }`}
-                      title="Double-click to View/Edit details"
-                    >
-                      <td className="py-3 px-6 font-mono font-bold text-smei-darkred">
-                        <div className="flex items-center gap-2">
-                          {activeSlipId === slip.id && (
-                            <div className="w-1.5 h-1.5 bg-smei-crimson rounded-full animate-pulse shrink-0" />
-                          )}
-                          <span>{slip.pisNumber}</span>
-                        </div>
-                      </td>
-                      <td className="py-3 px-6 font-semibold text-gray-800">{slip.payee}</td>
-                      <td className="py-3 px-6 text-gray-500 font-mono">
-                        {slip.scheduleDate} {slip.scheduleTime} {slip.ampm}
-                      </td>
-                      <td className="py-3 px-6 text-right font-mono font-bold text-gray-800">
-                        {new Intl.NumberFormat("en-PH", {
-                          style: "currency",
-                          currency: slip.currency === "Others" ? "PHP" : (slip.currency === "JP Yen" ? "JPY" : slip.currency),
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        }).format(slip.amount)}
-                      </td>
-                      <td className="py-3 px-6 text-gray-600 text-xs">
-                        {slip.paymentMode === "Others" ? slip.paymentModeOthers : slip.paymentMode}
-                      </td>
-                      <td className="py-3 px-6">
-                        <span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-bold border ${statusColors[slip.status] || "bg-gray-100"}`}>
-                          {slip.status}
-                        </span>
-                      </td>
-                      <td className="py-3 px-6 text-center" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-center gap-1.5">
-                          <button
-                            onClick={() => handleOpenModal(slip, false)}
-                            className="p-1 hover:bg-red-50 hover:text-smei-crimson text-gray-400 rounded transition-all"
-                            title="View PIS details"
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
-
-                          {isAuthorized && (
-                            <button
-                              onClick={() => handleOpenModal(slip, true)}
-                              className="p-1 hover:bg-blue-50 hover:text-blue-600 text-gray-400 rounded transition-all"
-                              title="Edit PIS"
-                            >
-                              <Edit3 className="w-4 h-4" />
-                            </button>
-                          )}
-
-                          {isAuthorized && (
-                            <button
-                              onClick={() => handleDelete(slip.id, slip.pisNumber)}
-                              className="p-1 hover:bg-rose-50 hover:text-rose-600 text-gray-400 rounded transition-all"
-                              title="Delete PIS"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
+                </thead>
+                <tbody className="text-xs">
+                  {loading ? (
+                    <TableSkeleton rows={5} columns={7} />
+                  ) : paginatedSlips.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-12 text-center text-gray-400">
+                        No Payment Instruction Slips found matching filters.
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    filteredSlips.map((slip, idx) => (
+                      <tr
+                        key={slip.id}
+                        onClick={() => {
+                            setActiveSlipId(slip.id);
+                            setSelectedSlip(slip);
+                        }}
+                        onDoubleClick={() => handleOpenModal(slip, isAuthorized)}
+                        className={`cursor-pointer transition-all border-b border-gray-50/60 group ${
+                          activeSlipId === slip.id
+                            ? "bg-red-600/20 border-l-4 border-l-smei-crimson font-medium"
+                            : idx % 2 === 1
+                            ? "bg-gray-50/30 hover:bg-red-600/10"
+                            : "bg-white hover:bg-red-600/10"
+                        }`}
+                        title="Double-click to View/Edit details"
+                      >
+                        <td className="py-3 px-6 font-mono font-bold text-smei-darkred">
+                          <div className="flex items-center gap-2">
+                            {activeSlipId === slip.id && (
+                              <div className="w-1.5 h-1.5 bg-smei-crimson rounded-full animate-pulse shrink-0" />
+                            )}
+                            <span>{slip.pisNumber}</span>
+                          </div>
+                        </td>
+                        <td className="py-3 px-6 font-semibold text-gray-800">{slip.payee}</td>
+                        <td className="py-3 px-6 text-gray-500 font-mono">
+                          {slip.scheduleDate} {slip.scheduleTime} {slip.ampm}
+                        </td>
+                        <td className="py-3 px-6 text-right font-mono font-bold text-gray-800">
+                          {new Intl.NumberFormat("en-PH", {
+                            style: "currency",
+                            currency: slip.currency === "Others" ? "PHP" : (slip.currency === "JP Yen" ? "JPY" : slip.currency),
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          }).format(slip.amount)}
+                        </td>
+                        <td className="py-3 px-6 text-gray-600 text-xs">
+                          {slip.paymentMode === "Others" ? slip.paymentModeOthers : slip.paymentMode}
+                        </td>
+                        <td className="py-3 px-6">
+                          <span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-bold border ${statusColors[slip.status] || "bg-gray-100"}`}>
+                            {slip.status}
+                          </span>
+                        </td>
+                        <td className="py-3 px-6 text-center" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              onClick={() => handleOpenModal(slip, false)}
+                              className="p-1 hover:bg-red-50 hover:text-smei-crimson text-gray-400 rounded transition-all"
+                              title="View PIS details"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+
+                            {isAuthorized && (
+                              <button
+                                onClick={() => handleOpenModal(slip, true)}
+                                className="p-1 hover:bg-blue-50 hover:text-blue-600 text-gray-400 rounded transition-all"
+                                title="Edit PIS"
+                              >
+                                <Edit3 className="w-4 h-4" />
+                              </button>
+                            )}
+
+                            {isAuthorized && (
+                              <button
+                                onClick={() => handleDelete(slip.id, slip.pisNumber)}
+                                className="p-1 hover:bg-rose-50 hover:text-rose-600 text-gray-400 rounded transition-all"
+                                title="Delete PIS"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
-
-        {/* Right Column: Live Document Preview (Set to 41.67% / col-span-5 to balance layout) */}
-        <div className="lg:col-span-5 h-[calc(100vh-280px)] min-h-[500px] sticky top-6">
-          {selectedSlip ? (
-            <DocumentPreview
-              moduleName="pis"
-              format="excel"
-              data={selectedSlip}
-            />
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full bg-slate-50 border border-slate-200 border-dashed rounded-xl p-8 text-slate-400">
-              <FileText className="w-12 h-12 text-slate-300 mb-2 animate-pulse" />
-              <p className="text-sm font-medium">Select a PIS document to display live preview</p>
-            </div>
-          )}
-        </div>
-      </div>
 
       {/* View/Create/Edit Modal Dialog */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 flex items-center justify-center p-4 backdrop-blur-xs">
-          <div className="bg-white rounded-xl shadow-xl border border-gray-100 w-full max-w-7xl overflow-hidden transition-all scale-100">
+          <div className="bg-white rounded-xl shadow-xl border border-gray-100 w-full max-w-3xl overflow-hidden transition-all scale-100">
             <div className="bg-smei-crimson text-white px-6 py-4 flex items-center justify-between">
               <div>
                 <h3 className="text-base font-bold uppercase tracking-wide">
@@ -643,9 +697,9 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
               </button>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 max-h-[80vh] overflow-y-auto">
-              {/* Left Column: Form Editor */}
-              <div className="lg:col-span-6">
+            <div className="p-6 max-h-[80vh] overflow-y-auto">
+              {/* Form Editor */}
+              <div className="w-full">
                 <form onSubmit={handleSubmit} className="space-y-4">
                   {errors.server && (
                     <div className="bg-rose-50 border-l-4 border-rose-500 text-rose-700 text-xs p-3 rounded-md font-medium">
@@ -705,60 +759,169 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
                       {errors.payee && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.payee}</p>}
                     </div>
 
-                    {/* Gross, EWT, and Total Calculations */}
-                    <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-4 bg-gray-50/80 p-4 rounded-xl border border-gray-100">
-                      {/* Gross */}
-                      <div>
-                        <label className="block text-xs font-bold text-gray-700 mb-1">Gross Amount:</label>
-                        <div className="relative">
-                          <span className="absolute left-3 top-2 text-xs font-bold text-gray-400">₱</span>
-                          <input
-                            type="number"
-                            step="any"
-                            disabled={!isEditMode}
-                            placeholder="0.00"
-                            className={`w-full text-sm pl-7 pr-2 p-2 border rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson bg-white outline-none ${
-                              errors.gross ? "border-rose-500 bg-rose-50/20" : "border-gray-200"
-                            }`}
-                            value={gross === 0 ? "" : gross}
-                            onChange={(e) => setGross(e.target.value === "" ? 0 : Number(e.target.value))}
-                          />
-                        </div>
-                        {errors.gross && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.gross}</p>}
+                    {/* Dynamic Payments Breakdown List */}
+                    <div className="md:col-span-2 bg-gray-50/50 p-4 rounded-xl border border-gray-100 space-y-4">
+                      <div className="flex justify-between items-center pb-2 border-b border-gray-100">
+                        <h4 className="text-sm font-bold text-gray-800">Payment Breakdown</h4>
+                        {payments.length < 3 && isEditMode && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (payments.length >= 3) return;
+                              setPayments([
+                                ...payments,
+                                { id: String(Date.now()), paymentPurpose: "", gross: 0, ewt: 0, total: 0 }
+                              ]);
+                            }}
+                            className="text-xs font-semibold px-2.5 py-1.5 bg-smei-crimson text-white rounded-lg hover:bg-smei-crimson/90 active:scale-95 transition-all flex items-center gap-1 shadow-sm"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            Add Payment
+                          </button>
+                        )}
+                        {payments.length >= 3 && isEditMode && (
+                          <span className="text-[10px] font-semibold px-2 py-1 bg-amber-50 text-amber-600 border border-amber-200 rounded-lg">
+                            Template limit (3 payments) reached
+                          </span>
+                        )}
                       </div>
 
-                      {/* EWT (%) */}
-                      <div>
-                        <label className="block text-xs font-bold text-gray-700 mb-1">EWT (%):</label>
-                        <div className="relative">
-                          <input
-                            type="number"
-                            step="any"
-                            disabled={!isEditMode}
-                            placeholder="0.00"
-                            className={`w-full text-sm pr-7 p-2 border rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson bg-white outline-none ${
-                              errors.ewt ? "border-rose-500 bg-rose-50/20" : "border-gray-200"
-                            }`}
-                            value={ewt === 0 ? "" : ewt}
-                            onChange={(e) => setEwt(e.target.value === "" ? 0 : Number(e.target.value))}
-                          />
-                          <span className="absolute right-3 top-2 text-xs font-bold text-gray-400">%</span>
-                        </div>
-                        {errors.ewt && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.ewt}</p>}
+                      <div className="space-y-3">
+                        {payments.map((p, idx) => (
+                          <div key={p.id} className="relative grid grid-cols-1 md:grid-cols-12 gap-3 bg-white p-3.5 rounded-lg border border-gray-100 shadow-sm">
+                            {/* Header / Delete row */}
+                            <div className="md:col-span-12 flex justify-between items-center">
+                              <span className="text-[11px] font-bold text-gray-400 font-mono">Entry #{idx + 1}</span>
+                              {payments.length > 1 && isEditMode && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPayments(payments.filter(item => item.id !== p.id));
+                                  }}
+                                  className="text-xs font-semibold text-rose-500 hover:text-rose-700 transition-all flex items-center gap-1 px-1.5 py-0.5 rounded-md hover:bg-rose-50"
+                                >
+                                  Remove
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Payment Purpose */}
+                            <div className="md:col-span-6">
+                              <label className="block text-[10px] font-bold text-gray-500 mb-0.5 uppercase tracking-wider">Payment Purpose:</label>
+                              <input
+                                type="text"
+                                disabled={!isEditMode}
+                                placeholder="e.g., PPE MAINTAINING STOCKS"
+                                className={`w-full text-xs p-2 border rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none ${
+                                  errors[`paymentPurpose_${p.id}`] ? "border-rose-500 bg-rose-50/20" : "border-gray-200 bg-white"
+                                }`}
+                                value={p.paymentPurpose}
+                                onChange={(e) => {
+                                  const updated = payments.map(item => {
+                                    if (item.id === p.id) {
+                                      return { ...item, paymentPurpose: e.target.value };
+                                    }
+                                    return item;
+                                  });
+                                  setPayments(updated);
+                                }}
+                              />
+                              {errors[`paymentPurpose_${p.id}`] && <p className="text-[9px] text-rose-500 mt-0.5 font-semibold">{errors[`paymentPurpose_${p.id}`]}</p>}
+                            </div>
+
+                            {/* Gross */}
+                            <div className="md:col-span-2">
+                              <label className="block text-[10px] font-bold text-gray-500 mb-0.5 uppercase tracking-wider">Gross:</label>
+                              <div className="relative">
+                                <span className="absolute left-2.5 top-2 text-xs font-bold text-gray-400">₱</span>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  disabled={!isEditMode}
+                                  placeholder="0.00"
+                                  className={`w-full text-xs pl-5 pr-1.5 p-2 border rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none ${
+                                    errors[`gross_${p.id}`] ? "border-rose-500 bg-rose-50/20" : "border-gray-200 bg-white"
+                                  }`}
+                                  value={p.gross === 0 ? "" : p.gross}
+                                  onChange={(e) => {
+                                    const val = e.target.value === "" ? 0 : Number(e.target.value);
+                                    const updated = payments.map(item => {
+                                      if (item.id === p.id) {
+                                        return { ...item, gross: val, total: Number((val - item.ewt).toFixed(2)) };
+                                      }
+                                      return item;
+                                    });
+                                    setPayments(updated);
+                                  }}
+                                />
+                              </div>
+                              {errors[`gross_${p.id}`] && <p className="text-[9px] text-rose-500 mt-0.5 font-semibold">{errors[`gross_${p.id}`]}</p>}
+                            </div>
+
+                            {/* EWT */}
+                            <div className="md:col-span-2">
+                              <label className="block text-[10px] font-bold text-gray-500 mb-0.5 uppercase tracking-wider">EWT:</label>
+                              <div className="relative">
+                                <span className="absolute left-2.5 top-2 text-xs font-bold text-gray-400">₱</span>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  disabled={!isEditMode}
+                                  placeholder="0.00"
+                                  className={`w-full text-xs pl-5 pr-1.5 p-2 border rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none ${
+                                    errors[`ewt_${p.id}`] ? "border-rose-500 bg-rose-50/20" : "border-gray-200 bg-white"
+                                  }`}
+                                  value={p.ewt === 0 ? "" : p.ewt}
+                                  onChange={(e) => {
+                                    const val = e.target.value === "" ? 0 : Number(e.target.value);
+                                    const updated = payments.map(item => {
+                                      if (item.id === p.id) {
+                                        return { ...item, ewt: val, total: Number((item.gross - val).toFixed(2)) };
+                                      }
+                                      return item;
+                                    });
+                                    setPayments(updated);
+                                  }}
+                                />
+                              </div>
+                              {errors[`ewt_${p.id}`] && <p className="text-[9px] text-rose-500 mt-0.5 font-semibold">{errors[`ewt_${p.id}`]}</p>}
+                            </div>
+
+                            {/* Total (derived) */}
+                            <div className="md:col-span-2">
+                              <label className="block text-[10px] font-bold text-gray-500 mb-0.5 uppercase tracking-wider">Net Total:</label>
+                              <div className="relative">
+                                <span className="absolute left-2.5 top-2 text-xs font-bold text-gray-500">₱</span>
+                                <input
+                                  type="text"
+                                  disabled
+                                  placeholder="0.00"
+                                  className="w-full text-xs pl-5 pr-1.5 p-2 border border-gray-100 rounded-lg bg-gray-50 font-mono font-bold text-gray-700 outline-none"
+                                  value={p.total ? new Intl.NumberFormat("en-PH").format(p.total) : "0.00"}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        ))}
                       </div>
 
-                      {/* Total */}
-                      <div>
-                        <label className="block text-xs font-bold text-gray-700 mb-1">Total Net Amount:</label>
-                        <div className="relative">
-                          <span className="absolute left-3 top-2 text-xs font-bold text-gray-500">₱</span>
-                          <input
-                            type="number"
-                            disabled
-                            placeholder="0.00"
-                            className="w-full text-sm pl-7 pr-2 p-2 border border-gray-100 rounded-lg bg-gray-100 font-mono font-bold text-gray-700 outline-none"
-                            value={total}
-                          />
+                      {/* Cumulative summary display */}
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-white p-3 rounded-lg border border-gray-100 shadow-sm text-xs font-semibold text-gray-600">
+                        <div>
+                          <span className="block text-[9px] font-bold text-gray-400 uppercase tracking-wider">Total Gross:</span>
+                          <span className="font-mono text-gray-800 text-sm">₱{new Intl.NumberFormat("en-PH", { minimumFractionDigits: 2 }).format(gross)}</span>
+                        </div>
+                        <div>
+                          <span className="block text-[9px] font-bold text-gray-400 uppercase tracking-wider">Total EWT:</span>
+                          <span className="font-mono text-gray-800 text-sm">₱{new Intl.NumberFormat("en-PH", { minimumFractionDigits: 2 }).format(ewt)}</span>
+                        </div>
+                        <div>
+                          <span className="block text-[9px] font-bold text-gray-400 uppercase tracking-wider">Total Amount (Net):</span>
+                          <span className="font-mono text-smei-crimson text-sm font-bold">₱{new Intl.NumberFormat("en-PH", { minimumFractionDigits: 2 }).format(total)}</span>
+                        </div>
+                        <div>
+                          <span className="block text-[9px] font-bold text-gray-400 uppercase tracking-wider">Count:</span>
+                          <span className="font-mono text-gray-800 text-sm">{payments.length} of 3</span>
                         </div>
                       </div>
                     </div>
@@ -1004,20 +1167,10 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
                   </div>
                 </form>
               </div>
-
-              {/* Right Column: Live Document Preview */}
-              <div className="lg:col-span-6 h-[450px] lg:h-[70vh] sticky top-0">
-                <DocumentPreview
-                  moduleName="pis"
-                  format="excel"
-                  data={currentPISData}
-                />
-              </div>
             </div>
           </div>
         </div>
       )}
     </div>
-  </div>
-);
+  );
 }

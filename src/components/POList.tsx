@@ -9,8 +9,8 @@ import { Search, Plus, Filter, Calendar, FileText, ArrowUpDown, Trash2, Edit3, E
 import { ExcelTemplateDownloadButton, exportPOToExcel } from "./ExcelIO";
 import { exportPOToWord } from "../utils/wordExport";
 import { TableSkeleton } from "./ui/Skeleton";
-import { ExportWordButton } from "./SharedButtons";
-import DocumentPreview from "./DocumentPreview";
+import { ExportWordButton, ExportPdfButton } from "./SharedButtons";
+import DeleteConfirmationModal from "./DeleteConfirmationModal";
 
 interface POListProps {
   pos: PurchaseOrder[];
@@ -43,7 +43,7 @@ const PORow = React.memo(({
   isStaff: boolean;
   setSelectedPOId: (id: string) => void;
   onSelectPO: (po: PurchaseOrder) => void;
-  onDeletePO: (id: string) => void;
+  onDeletePO: (po: PurchaseOrder) => void;
 }) => {
   const [isExporting, setIsExporting] = useState(false);
 
@@ -126,11 +126,7 @@ const PORow = React.memo(({
           
           {(isAdmin || (isStaff && po.status === "Draft")) && (
             <button
-              onClick={() => {
-                if (confirm(`Are you sure you want to delete purchase order ${po.poNumber}?`)) {
-                  onDeletePO(po.id);
-                }
-              }}
+              onClick={() => onDeletePO(po)}
               className="p-1.5 hover:bg-red-50 hover:text-smei-crimson text-gray-400 hover:text-smei-crimson rounded-lg transition-all"
               title="Delete PO"
             >
@@ -169,6 +165,8 @@ export default function POList({
       setSelectedPOId(pos[pos.length - 1].id);
     }
   }, [pos, selectedPOId]);
+
+  const [poToDelete, setPoToDelete] = useState<PurchaseOrder | null>(null);
 
   const isViewer = currentUser.role === UserRole.Viewer;
   const isStaff = currentUser.role === UserRole.PurchasingStaff;
@@ -223,170 +221,196 @@ export default function POList({
     }
   };
 
+  const handleTriggerPDFExport = async () => {
+    const targetPO = pos.find((p) => p.id === selectedPOId);
+    if (targetPO) {
+      try {
+        const { printDocument } = await import("../utils/printDocument");
+        await printDocument("po", targetPO);
+      } catch (err: any) {
+        alert("Failed to print: " + (err.message || err));
+      }
+    } else {
+      alert("Please select a purchase order first.");
+    }
+  };
+
   return (
-    <div id="smei-po-list" className="p-6 md:p-10 space-y-6 max-w-[130rem] mx-auto w-full">
+    <>
+      <div id="smei-po-list" className="p-4 md:p-6 space-y-4 max-w-[130rem] mx-auto w-full">
       {/* Upper Action Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800 tracking-tight font-display">Purchase Orders Directory</h2>
-          <p className="text-sm text-gray-500 mt-0.5">Create, revise, and generate compliance-validated Cavite EPZA procurement sheets</p>
+          <h2 className="text-xl md:text-2xl font-bold text-gray-800 tracking-tight font-display">Purchase Orders Directory</h2>
+          <p className="text-xs md:text-sm text-gray-500 mt-0.5">Create, revise, and generate compliance-validated Cavite EPZA procurement sheets</p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <ExportWordButton
-            onClick={handleExportAll}
-            disabled={!selectedPOId || isExporting}
-            selectedText={pos.find((p) => p.id === selectedPOId)?.poNumber || ""}
-            label={isExporting ? "Generating..." : "Export Word"}
-          />
-
-          {!isViewer && (
-            <button
-              onClick={onAddNewPO}
-              className="inline-flex items-center gap-2 bg-gradient-to-r from-smei-darkred to-smei-crimson text-white font-semibold px-4 py-2.5 rounded-xl shadow-lg shadow-red-950/15 hover:shadow-red-950/20 active:scale-[0.98] transition-all text-sm"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Create Purchase Order</span>
-            </button>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4 w-full md:w-auto md:justify-end">
+          {selectedPOId && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-gray-500 uppercase font-mono tracking-wider">Selected:</span>
+              <span className="text-[11px] font-bold font-mono text-smei-crimson bg-red-50 border border-red-200 px-2.5 py-1 rounded-md">
+                {pos.find((p) => p.id === selectedPOId)?.poNumber || ""}
+              </span>
+            </div>
           )}
-        </div>
-      </div>
 
-
-      {/* Advanced Searching & Filters Board */}
-      <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Search Term */}
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Search Keywords</label>
-            <div className="relative">
-              <Search className="absolute left-3.5 top-3 w-4 h-4 text-gray-400" />
-              <input
-                type="text"
-                placeholder="PO#, supplier, category, authorizer..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs sm:text-sm font-sans focus:outline-none focus:ring-1.5 focus:ring-smei-crimson focus:border-transparent focus:bg-white transition-all"
-              />
-            </div>
-          </div>
-
-          {/* Workflow Status Filter */}
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Workflow Status</label>
-            <div className="relative">
-              <Filter className="absolute left-3.5 top-3 w-4 h-4 text-gray-400" />
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs sm:text-sm font-sans focus:outline-none focus:ring-1.5 focus:ring-smei-crimson focus:border-transparent focus:bg-white transition-all text-gray-700"
-              >
-                <option value="All">All Statuses</option>
-                <option value="Draft">Draft</option>
-                <option value="Pending Review">Pending Review</option>
-                <option value="Pending Approval">Pending Approval</option>
-                <option value="Approved">Approved</option>
-                <option value="Rejected">Rejected</option>
-                <option value="Cancelled">Cancelled</option>
-                <option value="Closed">Closed</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Date From */}
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Date From</label>
-            <div className="relative">
-              <Calendar className="absolute left-3.5 top-3 w-4 h-4 text-gray-400" />
-              <input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs sm:text-sm font-sans focus:outline-none focus:ring-1.5 focus:ring-smei-crimson focus:border-transparent focus:bg-white transition-all text-gray-700 font-mono"
-              />
-            </div>
-          </div>
-
-          {/* Date To */}
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Date To</label>
-            <div className="relative">
-              <Calendar className="absolute left-3.5 top-3 w-4 h-4 text-gray-400" />
-              <input
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs sm:text-sm font-sans focus:outline-none focus:ring-1.5 focus:ring-smei-crimson focus:border-transparent focus:bg-white transition-all text-gray-700 font-mono"
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Split Layout for Grid and Live Preview */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left column: List table (Expanded to 58.33% / col-span-7 for enterprise screens) */}
-        <div className="lg:col-span-7 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[calc(100vh-280px)] min-h-[500px]">
-          <div className="overflow-x-auto overflow-y-auto flex-1">
-            <table id="smei-po-table" className="w-full text-left border-collapse min-w-[600px]">
-              <thead className="sticky top-0 bg-gray-50 z-10 shadow-sm">
-                <tr className="text-gray-500 text-xs uppercase tracking-wider font-semibold border-b border-gray-100">
-                  <th className="py-4 px-6 font-display whitespace-nowrap">PO Number</th>
-                  <th className="py-4 px-6 font-display whitespace-nowrap">Supplier</th>
-                  <th className="py-4 px-6 font-display whitespace-nowrap">Purchase Category</th>
-                  <th className="py-4 px-6 font-display whitespace-nowrap">Creation Date</th>
-                  <th className="py-4 px-6 font-display text-right whitespace-nowrap">Gross Total Amount</th>
-                  <th className="py-4 px-6 font-display whitespace-nowrap">Workflow Status</th>
-                  <th className="py-4 px-6 font-display whitespace-nowrap">Prepared By</th>
-                  <th className="py-4 px-6 font-display text-center whitespace-nowrap">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 text-xs">
-                {isExporting ? (
-                  <TableSkeleton rows={5} columns={8} />
-                ) : filteredPOs.length > 0 ? (
-                  filteredPOs.map((po, index) => (
-                    <PORow
-                      key={po.id}
-                      po={po}
-                      index={index}
-                      selectedPOId={selectedPOId}
-                      statusColors={statusColors}
-                      isAdmin={isAdmin}
-                      isStaff={isStaff}
-                      setSelectedPOId={setSelectedPOId}
-                      onSelectPO={onSelectPO}
-                      onDeletePO={onDeletePO}
-                    />
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={8} className="py-12 text-center text-gray-400 font-sans">
-                      No purchase orders match your filter criteria.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Right column: Live Document Preview (Set to 41.67% / col-span-5 to balance layout) */}
-        <div className="lg:col-span-5 h-[calc(100vh-280px)] min-h-[500px] sticky top-6">
-          {pos.find((p) => p.id === selectedPOId) ? (
-            <DocumentPreview
-              moduleName="po"
-              format="word"
-              data={pos.find((p) => p.id === selectedPOId)}
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
+            <ExportWordButton
+              onClick={handleExportAll}
+              disabled={!selectedPOId || isExporting}
+              label={isExporting ? "Generating..." : "Export Word"}
             />
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full bg-slate-50 border border-slate-200 border-dashed rounded-xl p-8 text-slate-400">
-              <FileText className="w-12 h-12 text-slate-300 mb-2 animate-pulse" />
-              <p className="text-sm font-medium">Select a purchase order to display live preview</p>
-            </div>
-          )}
+            <ExportPdfButton
+              onClick={handleTriggerPDFExport}
+              disabled={!selectedPOId}
+            />
+            {!isViewer && (
+              <button
+                onClick={onAddNewPO}
+                className="bg-smei-crimson hover:bg-smei-darkred text-white text-sm font-semibold h-[38px] px-4 rounded-lg flex items-center justify-center gap-1.5 shadow-sm transition-all hover:scale-[1.02] active:scale-95 whitespace-nowrap flex-shrink-0 w-full sm:w-auto cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Create PO</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+
+      {/* Full Width Layout for PO Grid */}
+      <div className="w-full flex flex-col gap-4 h-[calc(100vh-170px)] min-h-[650px]">
+        
+        {/* Advanced Searching & Filters Board (Compressed) */}
+        <div className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+              {/* Search Term */}
+              <div className="space-y-0.5">
+                <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Search Keywords</label>
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="PO#, supplier..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full pl-7.5 pr-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-sans focus:outline-none focus:ring-1 focus:ring-smei-crimson focus:border-transparent focus:bg-white transition-all text-gray-700"
+                  />
+                </div>
+              </div>
+
+              {/* Workflow Status Filter */}
+              <div className="space-y-0.5">
+                <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Status</label>
+                <div className="relative">
+                  <Filter className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-gray-400" />
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    className="w-full pl-7.5 pr-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-sans focus:outline-none focus:ring-1 focus:ring-smei-crimson focus:border-transparent focus:bg-white transition-all text-gray-700"
+                  >
+                    <option value="All">All Statuses</option>
+                    <option value="Draft">Draft</option>
+                    <option value="Pending Review">Pending Review</option>
+                    <option value="Pending Approval">Pending Approval</option>
+                    <option value="Approved">Approved</option>
+                    <option value="Rejected">Rejected</option>
+                    <option value="Cancelled">Cancelled</option>
+                    <option value="Closed">Closed</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Date From */}
+              <div className="space-y-0.5">
+                <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Date From</label>
+                <div className="relative">
+                  <Calendar className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-gray-400" />
+                  <input
+                    type="date"
+                    value={dateFrom}
+                    onChange={(e) => setDateFrom(e.target.value)}
+                    className="w-full pl-7.5 pr-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-sans focus:outline-none focus:ring-1 focus:ring-smei-crimson focus:border-transparent focus:bg-white transition-all text-gray-700 font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Date To */}
+              <div className="space-y-0.5">
+                <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Date To</label>
+                <div className="relative">
+                  <Calendar className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-gray-400" />
+                  <input
+                    type="date"
+                    value={dateTo}
+                    onChange={(e) => setDateTo(e.target.value)}
+                    className="w-full pl-7.5 pr-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-sans focus:outline-none focus:ring-1 focus:ring-smei-crimson focus:border-transparent focus:bg-white transition-all text-gray-700 font-mono"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* List table */}
+          <div className="flex-1 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
+            <div className="overflow-x-auto overflow-y-auto flex-1">
+              <table id="smei-po-table" className="w-full text-left border-collapse min-w-[600px]">
+                <thead className="sticky top-0 bg-gray-50 z-10 shadow-sm">
+                  <tr className="text-gray-500 text-xs uppercase tracking-wider font-semibold border-b border-gray-100">
+                    <th className="py-3.5 px-6 font-display whitespace-nowrap">PO Number</th>
+                    <th className="py-3.5 px-6 font-display whitespace-nowrap">Supplier</th>
+                    <th className="py-3.5 px-6 font-display whitespace-nowrap">Purchase Category</th>
+                    <th className="py-3.5 px-6 font-display whitespace-nowrap">Creation Date</th>
+                    <th className="py-3.5 px-6 font-display text-right whitespace-nowrap">Gross Total Amount</th>
+                    <th className="py-3.5 px-6 font-display whitespace-nowrap">Workflow Status</th>
+                    <th className="py-3.5 px-6 font-display whitespace-nowrap">Prepared By</th>
+                    <th className="py-3.5 px-6 font-display text-center whitespace-nowrap">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 text-xs">
+                  {isExporting ? (
+                    <TableSkeleton rows={5} columns={8} />
+                  ) : filteredPOs.length > 0 ? (
+                    filteredPOs.map((po, index) => (
+                      <PORow
+                        key={po.id}
+                        po={po}
+                        index={index}
+                        selectedPOId={selectedPOId}
+                        statusColors={statusColors}
+                        isAdmin={isAdmin}
+                        isStaff={isStaff}
+                        setSelectedPOId={setSelectedPOId}
+                        onSelectPO={onSelectPO}
+                        onDeletePO={(targetPo) => setPoToDelete(targetPo)}
+                      />
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={8} className="py-12 text-center text-gray-400 font-sans">
+                        No purchase orders match your filter criteria.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <DeleteConfirmationModal
+        isOpen={poToDelete !== null}
+        onClose={() => setPoToDelete(null)}
+        onConfirm={() => {
+          if (poToDelete) {
+            onDeletePO(poToDelete.id);
+          }
+        }}
+        title="Delete Purchase Order"
+        message={`Are you sure you want to delete purchase order ${poToDelete?.poNumber}? This action is irreversible.`}
+        recordIdentifier={poToDelete?.poNumber}
+      />
+    </>
   );
 }

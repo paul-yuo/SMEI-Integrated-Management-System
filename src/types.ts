@@ -105,6 +105,10 @@ export interface PurchaseOrder {
   discountVatAmount: number;
   partsEwt1: number;
   laborEwt2: number;
+  ewtType?: string;
+  ewtPercentage?: number;
+  partsEwtPercentage?: number;
+  laborEwtPercentage?: number;
   totalAmount: number;
   
   // Terms
@@ -175,6 +179,14 @@ export interface Notification {
   poId?: string;
 }
 
+export interface PaymentEntry {
+  id: string;
+  paymentPurpose: string;
+  gross: number;
+  ewt: number;
+  total: number;
+}
+
 export interface PaymentInstructionSlip {
   id: string;
   pisNumber: string;
@@ -191,6 +203,7 @@ export interface PaymentInstructionSlip {
   paymentMode: "Cash" | "Check Crossed" | "Check Not Crossed" | "T/T" | "Others";
   paymentModeOthers?: string;
   remarks: string;
+  payments?: PaymentEntry[];
   
   // Signatories
   requestedBy: string;

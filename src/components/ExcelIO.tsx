@@ -78,8 +78,12 @@ export const exportPOToExcel = (po: PurchaseOrder) => {
   dataRows.push(["12% VAT:", String(po.vat12)]);
   dataRows.push(["VAT Exempt Amount:", String(po.vatExemptAmount)]);
   dataRows.push(["Zero Rated Amount:", String(po.zeroRatedAmount)]);
-  dataRows.push(["Parts EWT (1%):", String(po.partsEwt1)]);
-  dataRows.push(["Labor EWT (2%):", String(po.laborEwt2)]);
+  if (po.ewtType && po.ewtPercentage !== undefined) {
+    dataRows.push([`${po.ewtType} (${po.ewtPercentage}%):`, String(po.partsEwt1 || po.laborEwt2 || 0)]);
+  } else {
+    dataRows.push(["Parts EWT (1%):", String(po.partsEwt1)]);
+    dataRows.push(["Labor EWT (2%):", String(po.laborEwt2)]);
+  }
   dataRows.push(["TOTAL AMOUNT PAYABLE (PHP):", String(po.totalAmount)]);
   dataRows.push([""]);
   dataRows.push(["TERMS SECTION"]);

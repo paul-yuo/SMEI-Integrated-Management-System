@@ -112,6 +112,7 @@ export function mapPOData(po: PurchaseOrder): Record<string, any> {
   const descLines: string[] = [];
   const priceLines: string[] = [];
   const amountLines: string[] = [];
+  const items: any[] = [];
 
   let totalDescLines = 0;
   const MAX_TOTAL_DESC_LINES = 18;
@@ -135,6 +136,14 @@ export function mapPOData(po: PurchaseOrder): Record<string, any> {
     priceLines.push(formatCurrency(item.unitPrice, symbol));
     amountLines.push(formatCurrency(item.amount, symbol));
 
+    items.push({
+      quantity: String(item.quantity || ""),
+      unit: item.unit || "",
+      description: desc,
+      unitPrice: formatCurrency(item.unitPrice, symbol),
+      amount: formatCurrency(item.amount, symbol)
+    });
+
     for (let pad = 1; pad < lCount; pad++) {
       qtyLines.push("");
       unitLines.push("");
@@ -145,7 +154,6 @@ export function mapPOData(po: PurchaseOrder): Record<string, any> {
 
   const QUANTITY = qtyLines.join("\n");
   const UNIT = unitLines.join("\n");
-  const DESCRIPTION = descLines.join("\n");
   const UNIT_PRICE = priceLines.join("\n");
   const AMOUNT = amountLines.join("\n");
 
@@ -185,9 +193,10 @@ export function mapPOData(po: PurchaseOrder): Record<string, any> {
 
     QUANTITY,
     UNIT,
-    DESCRIPTION,
     UNIT_PRICE,
     AMOUNT,
+
+    items,
 
     VATABLE_AMOUNT: po.category?.toLowerCase().includes("vatable") ? formatCurrency(po.vatableAmount, symbol) : "",
     VAT_AMOUNT: po.category?.toLowerCase().includes("vatable") ? formatCurrency(po.vat12, symbol) : "",
@@ -197,6 +206,8 @@ export function mapPOData(po: PurchaseOrder): Record<string, any> {
     GROSS_AMOUNT: formatCurrency(po.grossAmount || po.totalAmount, symbol),
     PARTS_EWT: po.partsEwt1 > 0 ? formatCurrency(po.partsEwt1, symbol) : "",
     LABOR_EWT: po.laborEwt2 > 0 ? formatCurrency(po.laborEwt2, symbol) : "",
+    EWT_TYPE: po.ewtType ?? "",
+    EWT_PERCENTAGE: po.ewtPercentage !== undefined ? `${po.ewtPercentage}%` : "",
     DISCOUNT_VAT_AMOUNT: po.discountVatAmount > 0 ? formatCurrency(po.discountVatAmount, symbol) : "",
 
     PAYMENT_TERMS: po.paymentTerms ?? "",
@@ -217,6 +228,58 @@ export function mapPOData(po: PurchaseOrder): Record<string, any> {
   };
 }
 
+export function wrapRemarks(remarks: string, maxLength: number = 34): string[] {
+  if (!remarks) return [];
+  const paragraphs = remarks.split(/\r?\n/);
+  const lines: string[] = [];
+
+  for (const paragraph of paragraphs) {
+    if (paragraph === "") {
+      lines.push("");
+      continue;
+    }
+    const words = paragraph.split(/ +/);
+    let currentLine = "";
+
+    for (const word of words) {
+      if (word === "") continue;
+      
+      if (currentLine === "") {
+        if (word.length > maxLength) {
+          let remaining = word;
+          while (remaining.length > maxLength) {
+            lines.push(remaining.slice(0, maxLength));
+            remaining = remaining.slice(maxLength);
+          }
+          currentLine = remaining;
+        } else {
+          currentLine = word;
+        }
+      } else {
+        if (currentLine.length + 1 + word.length <= maxLength) {
+          currentLine += " " + word;
+        } else {
+          lines.push(currentLine);
+          if (word.length > maxLength) {
+            let remaining = word;
+            while (remaining.length > maxLength) {
+              lines.push(remaining.slice(0, maxLength));
+              remaining = remaining.slice(maxLength);
+            }
+            currentLine = remaining;
+          } else {
+            currentLine = word;
+          }
+        }
+      }
+    }
+    if (currentLine !== "") {
+      lines.push(currentLine);
+    }
+  }
+  return lines;
+}
+
 export function mapPISData(slip: PaymentInstructionSlip): Record<string, any> {
   const formattedAmount = new Intl.NumberFormat("en-PH", {
     style: "currency",
@@ -225,56 +288,151 @@ export function mapPISData(slip: PaymentInstructionSlip): Record<string, any> {
     maximumFractionDigits: 2,
   }).format(slip.amount || 0);
 
+  const remarksText = slip.remarks || "";
+  const remarksLines = wrapRemarks(remarksText, 34);
+
+  // Amount Type mappings
+  const phpCheck = slip.currency === "PHP" ? "X" : "";
+  const usdCheck = slip.currency === "USD" ? "X" : "";
+  const yenCheck = slip.currency === "JP Yen" ? "X" : "";
+  const othersAmountCheck = slip.currency === "Others" ? "X" : "";
+  const specifyAmount = slip.currency === "Others" ? (slip.currencyOthers || "") : "";
+
+  // Payment Method mappings
+  const cashCheck = slip.paymentMode === "Cash" ? "X" : "";
+  const crossedCheck = slip.paymentMode === "Check Crossed" ? "X" : "";
+  const notCrossedCheck = slip.paymentMode === "Check Not Crossed" ? "X" : "";
+  const ttCheck = slip.paymentMode === "T/T" ? "X" : "";
+  const othersPaymentCheck = slip.paymentMode === "Others" ? "X" : "";
+  const specifyPayment = slip.paymentMode === "Others" ? (slip.paymentModeOthers || "") : "";
+
+  // Signatory positions defaults
+  const position1 = slip.checkedAndVerifiedByPosition || "Department Head";
+  const position2 = slip.verifiedByPosition || "Accounting Dept.";
+  const position3 = slip.acceptedByPosition || "Purchasing Manager";
+
+  const payments = slip.payments || [];
+  const hasPayments = payments.some(p => (p.paymentPurpose || "").trim() !== "" || (p.gross || 0) > 0 || (p.ewt || 0) > 0);
+  
+  let sumGross = 0;
+  let sumEwt = 0;
+  let sumTotal = 0;
+
+  if (hasPayments) {
+    payments.forEach(p => {
+      sumGross += p.gross || 0;
+      sumEwt += p.ewt || 0;
+      sumTotal += p.total || 0;
+    });
+  } else {
+    sumGross = Number(slip.gross) || 0;
+    sumEwt = Number(slip.ewt) || 0;
+    sumTotal = Number(slip.total) || 0;
+  }
+
+  const hasGross = sumGross > 0;
+  const hasEwt = sumEwt > 0;
+  const hasTotal = sumTotal > 0;
+
+  const currencyCode = slip.currency === "Others" ? "PHP" : (slip.currency === "JP Yen" ? "JPY" : (slip.currency || "PHP"));
+  const formatVal = (val: number | undefined) => {
+    if (val === undefined || val === 0) return "";
+    return new Intl.NumberFormat("en-PH", {
+      style: "currency",
+      currency: currencyCode,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(val);
+  };
+
+  const formattedGross = hasGross ? formatVal(sumGross) : "";
+  const formattedEwt = hasEwt ? formatVal(sumEwt) : "";
+  const formattedTotal = hasTotal ? formatVal(sumTotal) : "";
+
+  const mappedPayments: Record<string, any> = {};
+  for (let i = 0; i < 3; i++) {
+    const p = payments[i];
+    const idx = i + 1;
+    if (p && ((p.paymentPurpose || "").trim() !== "" || (p.gross || 0) > 0 || (p.ewt || 0) > 0)) {
+      mappedPayments[`PAYMENT_PURPOSE_${idx}`] = p.paymentPurpose || "";
+      mappedPayments[`GROSS_${idx}`] = p.gross > 0 ? formatVal(p.gross) : "";
+      mappedPayments[`EWT_${idx}`] = p.ewt > 0 ? formatVal(p.ewt) : "";
+      mappedPayments[`TOTAL_${idx}`] = p.total > 0 ? formatVal(p.total) : "";
+    } else {
+      mappedPayments[`PAYMENT_PURPOSE_${idx}`] = "";
+      mappedPayments[`GROSS_${idx}`] = "";
+      mappedPayments[`EWT_${idx}`] = "";
+      mappedPayments[`TOTAL_${idx}`] = "";
+    }
+  }
+
   return {
     PIS_NO: slip.pisNumber ?? "",
+    "PIS NO": slip.pisNumber ?? "",
     SCHEDULE_DATE: slip.scheduleDate ?? "",
+    "SCHEDULE DATE": slip.scheduleDate ?? "",
     PAYMENT_DATE: slip.scheduleDate ?? "", // Map to template placeholder
+    "PAYMENT DATE": slip.scheduleDate ?? "",
     SCHEDULE_TIME: `${slip.scheduleTime || ""} ${slip.ampm || ""}`.trim(),
+    "SCHEDULE TIME": `${slip.scheduleTime || ""} ${slip.ampm || ""}`.trim(),
     PAYEE: slip.payee ?? "",
     AMOUNT: formattedAmount,
-    GROSS: new Intl.NumberFormat("en-PH", {
-      style: "currency",
-      currency: slip.currency === "Others" ? "PHP" : (slip.currency === "JP Yen" ? "JPY" : (slip.currency || "PHP")),
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(slip.gross !== undefined ? slip.gross : (slip.amount || 0)),
-    EWT: `${slip.ewt !== undefined ? slip.ewt : 0}%`,
-    TOTAL: new Intl.NumberFormat("en-PH", {
-      style: "currency",
-      currency: slip.currency === "Others" ? "PHP" : (slip.currency === "JP Yen" ? "JPY" : (slip.currency || "PHP")),
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(slip.total !== undefined ? slip.total : (slip.amount || 0)),
+    GROSS: formattedGross,
+    EWT: formattedEwt,
+    TOTAL: formattedTotal,
+    HAS_GROSS: hasGross,
+    HAS_EWT: hasEwt,
+    HAS_TOTAL: hasTotal,
+    EWT_PERCENTAGE: hasEwt ? formattedEwt : "",
+    ...mappedPayments,
     CURRENCY: slip.currency === "Others" ? slip.currencyOthers : (slip.currency || ""),
     PAYMENT_MODE: slip.paymentMode === "Others" ? slip.paymentModeOthers : (slip.paymentMode || ""),
     REMARKS: slip.remarks || "",
+    REMARKS_LINE_1: remarksLines[0] || "",
+    REMARKS_LINE_2: remarksLines[1] || "",
+    REMARKS_LINE_3: remarksLines[2] || "",
+    REMARKS_LINE_4: remarksLines[3] || "",
+    REMARKS_LINE_5: remarksLines[4] || "",
     REQUESTED_BY: slip.requestedBy ?? "",
+    "REQUESTED BY": slip.requestedBy ?? "",
     REQUESTED_DATE: slip.requestedDate ?? "",
+    "REQUESTED DATE": slip.requestedDate ?? "",
     CHECKED_BY: slip.checkedAndVerifiedBy || "",
+    "CHECKED BY": slip.checkedAndVerifiedBy || "",
     VERIFIED_BY: slip.verifiedBy || "",
+    "VERIFIED BY": slip.verifiedBy || "",
     ACCEPTED_BY: slip.acceptedBy || "",
+    "ACCEPTED BY": slip.acceptedBy || "",
     STATUS: slip.status ?? "",
+
+    // AM/PM Checkmarks
+    AM: slip.ampm === "AM" ? "X" : "",
+    PM: slip.ampm === "PM" ? "X" : "",
+
+    // Placeholder checkboxes & text
+    PHP: phpCheck,
+    US: usdCheck,
+    YEN: yenCheck,
+    OTHERS_AMOUNT: othersAmountCheck,
+    SPECIFY_AMOUNT: specifyAmount,
+    CASH: cashCheck,
+    CROSSED: crossedCheck,
+    NOT_CROSSED: notCrossedCheck,
+    TT: ttCheck,
+    OTHERS_PAYMENT: othersPaymentCheck,
+    SPECIFY_PAYMENT: specifyPayment,
+    POSITION_1: position1,
+    "POSITION 1": position1,
+    POSITION_2: position2,
+    "POSITION 2": position2,
+    POSITION_3: position3,
+    "POSITION 3": position3,
   };
 }
 
 export function mapRFSData(req: RequestForSupply): { exportData: Record<string, any>; items: any[] } {
   const formattedRFS = formatRFSNo(req.rfsNumber, req.dateRequested);
-  const exportData = {
-    RFS_NO: formattedRFS,
-    REQUEST_DATE: req.dateRequested ?? "",
-    DUE_DATE: req.dueDate || "",
-    RECEIVED_DATE: req.dueDate || "", // Map to template placeholder
-    DEPARTMENT: req.department === "Others" ? req.departmentOthers : (req.department || ""),
-    CONTROL_NO: formattedRFS,
-    PO_NO: req.purchaseOrderNumber || "",
-    STATUS: req.status ?? "",
-    MODE: req.modeOfRequest ?? "",
-    PURPOSE: req.purpose ?? "",
-    REQUESTED_BY: req.requestedBy ?? "",
-    VERIFIED_BY: req.verifiedBy || "",
-    APPROVED_BY: req.approvedBy || "",
-  };
-
+  
   const items = (req.items || []).map((it, index) => ({
     index: index + 1,
     quantity: it.quantity || 0,
@@ -289,30 +447,34 @@ export function mapRFSData(req: RequestForSupply): { exportData: Record<string, 
     remarks: it.remarks || "",
   }));
 
+  const exportData = {
+    RFS_NO: formattedRFS,
+    REQUEST_DATE: req.dateRequested ?? "",
+    DUE_DATE: req.dueDate || "",
+    RECEIVED_DATE: req.dueDate || "", // Map to template placeholder
+    DEPARTMENT: req.department === "Others" ? req.departmentOthers : (req.department || ""),
+    CONTROL_NO: formattedRFS,
+    PO_NO: req.purchaseOrderNumber || "",
+    STATUS: req.status ?? "",
+    MODE: req.modeOfRequest ?? "",
+    PURPOSE: req.purpose ?? "",
+    REQUESTED_BY: req.requestedBy ?? "",
+    VERIFIED_BY: req.verifiedBy || "",
+    APPROVED_BY: req.approvedBy || "",
+    
+    // Add joined line mappings for single-cell Word templates
+    QTY: items.map(it => String(it.quantity || "")).join("\n"),
+    UNIT: items.map(it => it.unit || "").join("\n"),
+    ITEM_DESCRIPTION: items.map(it => it.description || "").join("\n"),
+    REMARKS: items.map(it => it.remarks || "").join("\n")
+  };
+
   return { exportData, items };
 }
 
 export function mapCanvassData(sheet: CanvassSheet): { exportData: Record<string, any>; excelShops: any[]; excelItems: any[] } {
-  const sList = sheet.shops || [];
-  const pList = sheet.parts || [];
-
-  const s0 = sList[0] || { id: "s0", name: "", contactPerson: "", contactNo: "", workDuration: "", warranty: "", paymentTerms: "" };
-  const s1 = sList[1] || { id: "s1", name: "", contactPerson: "", contactNo: "", workDuration: "", warranty: "", paymentTerms: "" };
-
-  const total_shop1 = pList.reduce((sum, p) => sum + (Number(p.prices[s0.id]) || 0), 0);
-  const total_shop2 = pList.reduce((sum, p) => sum + (Number(p.prices[s1.id]) || 0), 0);
-
-  const isNonVat1 = !!s0.isNonVat;
-  const ratePercent1 = parseFloat((s0.nonVatRate || "1%").replace("%", "")) / 100;
-  const rate1 = isNonVat1 ? (isNaN(ratePercent1) ? 0.01 : ratePercent1) : 0.12;
-  const vat1 = total_shop1 * rate1;
-  const total_amount1 = total_shop1 + vat1;
-
-  const isNonVat2 = !!s1.isNonVat;
-  const ratePercent2 = parseFloat((s1.nonVatRate || "1%").replace("%", "")) / 100;
-  const rate2 = isNonVat2 ? (isNaN(ratePercent2) ? 0.01 : ratePercent2) : 0.12;
-  const vat2 = total_shop2 * rate2;
-  const total_amount2 = total_shop2 + vat2;
+  const sList = sheet.shops || sheet.suppliersList || [];
+  const pList = sheet.parts || sheet.partsList || [];
 
   const formatCurrencyLocal = (val: number) => {
     return new Intl.NumberFormat("en-PH", {
@@ -323,44 +485,13 @@ export function mapCanvassData(sheet: CanvassSheet): { exportData: Record<string
     }).format(val);
   };
 
-  const exportData = {
+  const exportData: Record<string, any> = {
     Control_NO: sheet.canvassNumber ?? "",
     Category: sheet.category || "General Procurement",
     Plate_No: sheet.plateNo || "",
-
-    shop_name1: s0.name || "",
-    shop_name2: s1.name || "",
-
-    contact_person1: s0.contactPerson || "",
-    contact_person2: s1.contactPerson || "",
-
-    contact_no1: s0.contactNo || "",
-    contact_no2: s1.contactNo || "",
-
     remarks: sheet.remarks || "",
-
-    work_duration1: s0.workDuration || "",
-    work_duration2: s1.workDuration || "",
-
-    warranty1: s0.warranty || "",
-    warranty2: s1.warranty || "",
-
-    payment_terms1: s0.paymentTerms || "",
-    payment_terms2: s1.paymentTerms || "",
-
     parts1: pList.map((p) => p.description).join("\n"),
-    parts_shop1_price1: pList.map((p) => (p.prices[s0.id] ? formatCurrencyLocal(p.prices[s0.id]) : "-")).join("\n"),
-    parts_shop2_price2: pList.map((p) => (p.prices[s1.id] ? formatCurrencyLocal(p.prices[s1.id]) : "-")).join("\n"),
-
-    total_shop1: formatCurrencyLocal(total_shop1),
-    total_shop2: formatCurrencyLocal(total_shop2),
-
-    vat1: formatCurrencyLocal(vat1),
-    vat2: formatCurrencyLocal(vat2),
-
-    total_amount1: formatCurrencyLocal(total_amount1),
-    total_amount2: formatCurrencyLocal(total_amount2),
-
+    partsList: pList,
     PREPARED_BY: sheet.requestedBy || "",
     PREPARED_BY_POSITION: sheet.preparedByPosition || "Canvasser",
     CHECKED_BY: sheet.checkedBy || "",
@@ -371,12 +502,57 @@ export function mapCanvassData(sheet: CanvassSheet): { exportData: Record<string
     APPROVED_BY_POSITION: sheet.approvedByPosition || "Purchasing Manager",
   };
 
+  // Populate dynamic suppliers 1 -> N
+  sList.forEach((s, idx) => {
+    const suffix = idx + 1;
+    const total_shop_val = pList.reduce((sum, p) => sum + (Number(p.prices[s.id]) || 0), 0);
+    const vat_val = 0;
+    const total_amount_val = total_shop_val;
+
+    exportData[`shop_name${suffix}`] = s.name || "";
+    exportData[`contact_person${suffix}`] = s.contactPerson || "";
+    exportData[`contact_no${suffix}`] = s.contactNo || "";
+    exportData[`work_duration${suffix}`] = s.workDuration || "";
+    exportData[`warranty${suffix}`] = s.warranty || "";
+    exportData[`payment_terms${suffix}`] = s.paymentTerms || "";
+    exportData[`parts_shop${suffix}_price${suffix}`] = pList.map((p) => (p.prices[s.id] ? formatCurrencyLocal(p.prices[s.id]) : "-")).join("\n");
+    exportData[`total_shop${suffix}`] = formatCurrencyLocal(total_shop_val);
+    exportData[`vat${suffix}`] = formatCurrencyLocal(vat_val);
+    exportData[`total_amount${suffix}`] = formatCurrencyLocal(total_amount_val);
+  });
+
+  // Backward compatible fallbacks in case sList is empty
+  if (sList.length === 0) {
+    exportData[`shop_name1`] = "";
+    exportData[`contact_person1`] = "";
+    exportData[`contact_no1`] = "";
+    exportData[`work_duration1`] = "";
+    exportData[`warranty1`] = "";
+    exportData[`payment_terms1`] = "";
+    exportData[`parts_shop1_price1`] = pList.map(() => "-").join("\n");
+    exportData[`total_shop1`] = formatCurrencyLocal(0);
+    exportData[`vat1`] = formatCurrencyLocal(0);
+    exportData[`total_amount1`] = formatCurrencyLocal(0);
+  }
+
+  // Populate individual item fields for Word/PDF row cloning
+  pList.forEach((part, partIdx) => {
+    exportData[`part_desc_${partIdx}`] = part.description || "";
+    sList.forEach((s, sIdx) => {
+      const i = sIdx + 1;
+      const priceVal = part.prices && part.prices[s.id];
+      exportData[`part_price_${i}_${partIdx}`] = (priceVal !== undefined && priceVal !== null && priceVal !== "")
+        ? formatCurrencyLocal(Number(priceVal))
+        : "-";
+    });
+    if (sList.length === 0) {
+      exportData[`part_price_1_${partIdx}`] = "-";
+    }
+  });
+
   const excelShops = sList.map((s) => {
     const t = pList.reduce((sum, p) => sum + (Number(p.prices[s.id]) || 0), 0);
-    const isNonVat = !!s.isNonVat;
-    const ratePercent = parseFloat((s.nonVatRate || "1%").replace("%", "")) / 100;
-    const rate = isNonVat ? (isNaN(ratePercent) ? 0.01 : ratePercent) : 0.12;
-    const v = t * rate;
+    const v = 0;
     return {
       name: s.name || "",
       contact_person: s.contactPerson || "",
@@ -387,10 +563,12 @@ export function mapCanvassData(sheet: CanvassSheet): { exportData: Record<string
       prices: pList.map((p) => p.prices[s.id] || 0),
       total: t,
       vat: v,
-      total_amount: t + v,
+      total_amount: t,
     };
   });
 
+  const s0 = sList[0] || { id: "s0" };
+  const s1 = sList[1] || { id: "s1" };
   const excelItems = pList.map((p, idx) => ({
     index: idx + 1,
     item: p.description,

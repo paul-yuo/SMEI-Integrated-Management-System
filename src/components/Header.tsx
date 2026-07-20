@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from "react";
 import { User, UserRole } from "../types";
-import { LogOut, Bell, Shield, User as UserIcon, Settings, Menu, KeyRound, UserCheck, Check, Sun, Moon } from "lucide-react";
+import { LogOut, Bell, Shield, User as UserIcon, Settings, Menu, KeyRound, UserCheck, Check, Sun, Moon, ArrowLeftRight } from "lucide-react";
 import smeiLogo from "../assets/images/smei_logo_1782431389924.jpg";
 import { useTheme } from "./ThemeProvider";
 import { motion, AnimatePresence } from "motion/react";
@@ -19,6 +19,8 @@ interface HeaderProps {
   onOpenNotifications: () => void;
   onOpenProfile: (activeSection: "profile" | "settings" | "password") => void;
   onToggleSidebar?: () => void;
+  onSwitchSystem?: () => void;
+  activeSystem?: "po" | "tsd" | null;
 }
 
 export default function Header({
@@ -29,7 +31,9 @@ export default function Header({
   unreadCount,
   onOpenNotifications,
   onOpenProfile,
-  onToggleSidebar
+  onToggleSidebar,
+  onSwitchSystem,
+  activeSystem
 }: HeaderProps) {
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
@@ -62,6 +66,20 @@ export default function Header({
     switch (currentTab) {
       case "dashboard":
         return "Dashboard Overview";
+      case "control-no":
+        return "TSD Tracking Code Generator";
+      case "unloading-loading":
+        return "Unloading & Loading Terminal Weighing Logs";
+      case "hazardous-waste":
+        return "Hazardous Waste Catalog";
+      case "waste-movement":
+        return "Internal Material Loop & Waste Movement Ledger";
+      case "timestamp":
+        return "Compliance Timestamp Timeline Tracker";
+      case "manifest-summary":
+        return "Hazardous Waste Manifest Summary Ledger";
+      case "tsd-summary":
+        return "TSD Facility Summary Executive Dashboard";
       case "po-list":
         return "Purchase Orders Directory";
       case "po-form":
@@ -99,14 +117,18 @@ export default function Header({
   return (
     <header id="smei-app-header" className="w-full flex flex-col no-print bg-white border-b border-gray-200 dark:bg-neutral-950 dark:border-neutral-900 transition-colors duration-300">
       {/* Top Operations & Profile Bar */}
-      <div className="py-3 px-6 md:px-10 flex items-center justify-between border-b border-gray-100 dark:border-neutral-900/50">
+      <div className="py-2.5 px-4 md:px-10 flex items-center justify-between border-b border-gray-100 dark:border-neutral-900/50 gap-2 sm:gap-4">
         {/* Left Side: Page Context (No branding duplicate, branding is in sidebar) */}
-        <div className="flex items-center gap-3">
-          <button onClick={onToggleSidebar} className="lg:hidden p-1.5 -ml-1 text-gray-500 hover:text-[#B22222] hover:bg-gray-100 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900 rounded transition-colors focus:outline-none">
-            <Menu className="w-5 h-5" />
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <button 
+            onClick={onToggleSidebar} 
+            className="lg:hidden w-11 h-11 flex items-center justify-center -ml-2 text-gray-500 hover:text-[#B22222] hover:bg-gray-100 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900 rounded-lg transition-colors focus:outline-none shrink-0 cursor-pointer"
+            aria-label="Toggle Navigation Sidebar"
+          >
+            <Menu className="w-5 h-5 pointer-events-none" />
           </button>
-          <div>
-            <h1 className="text-sm md:text-base font-bold text-gray-800 dark:text-white tracking-wide font-display uppercase">
+          <div className="min-w-0">
+            <h1 className="text-xs sm:text-sm md:text-base font-bold text-gray-800 dark:text-white tracking-wide font-display uppercase truncate max-w-[120px] sm:max-w-[250px] md:max-w-none">
               {getPageTitle()}
             </h1>
           </div>
@@ -114,12 +136,13 @@ export default function Header({
 
         {/* Right Side: Notification, Settings, Profile, Logout */}
         {currentUser && (
-          <div className="flex items-center gap-3 md:gap-4">
+          <div className="flex items-center gap-1.5 sm:gap-3 md:gap-4 shrink-0">
             {/* Theme Toggle Button */}
             <button
               onClick={toggleTheme}
-              className="p-2 text-gray-500 hover:text-[#B22222] hover:bg-gray-100 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900 rounded-lg transition-colors focus:outline-none relative w-9 h-9 flex items-center justify-center overflow-hidden"
+              className="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center text-gray-500 hover:text-[#B22222] hover:bg-gray-100 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900 rounded-lg transition-colors focus:outline-none relative overflow-hidden shrink-0 cursor-pointer"
               title={theme === 'light' ? "Switch to Dark Mode" : "Switch to Light Mode"}
+              aria-label="Toggle dark/light theme"
             >
               <AnimatePresence mode="wait" initial={false}>
                 <motion.div
@@ -128,9 +151,9 @@ export default function Header({
                   animate={{ y: 0, opacity: 1, rotate: 0 }}
                   exit={{ y: 20, opacity: 0, rotate: 90 }}
                   transition={{ duration: 0.2, ease: "easeInOut" }}
-                  className="absolute"
+                  className="absolute pointer-events-none flex items-center justify-center"
                 >
-                  {theme === 'light' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
+                  {theme === 'light' ? <Moon className="w-5 h-5 pointer-events-none" /> : <Sun className="w-5 h-5 pointer-events-none" />}
                 </motion.div>
               </AnimatePresence>
             </button>
@@ -138,12 +161,13 @@ export default function Header({
             {/* Notification Bell */}
             <button 
               onClick={onOpenNotifications}
-              className="relative p-2 text-gray-500 hover:text-[#B22222] hover:bg-gray-100 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900 rounded-lg transition-colors focus:outline-none"
+              className="relative w-11 h-11 md:w-9 md:h-9 flex items-center justify-center text-gray-500 hover:text-[#B22222] hover:bg-gray-100 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900 rounded-lg transition-colors focus:outline-none shrink-0 cursor-pointer"
               title="View Alerts"
+              aria-label="View notifications"
             >
-              <Bell className="w-5 h-5" />
+              <Bell className="w-5 h-5 pointer-events-none" />
               {unreadCount > 0 && (
-                <span className="absolute top-1.5 right-1.5 bg-[#B22222] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full border border-white dark:border-neutral-950 animate-pulse">
+                <span className="absolute top-2 right-2 md:top-1.5 md:right-1.5 bg-[#B22222] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full border border-white dark:border-neutral-950 animate-pulse pointer-events-none">
                   {unreadCount}
                 </span>
               )}
@@ -151,8 +175,9 @@ export default function Header({
 
             {/* Settings Button */}
             <button 
-              className="p-2 text-gray-500 hover:text-[#B22222] hover:bg-gray-100 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900 rounded-lg transition-colors focus:outline-none"
+              className="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center text-gray-500 hover:text-[#B22222] hover:bg-gray-100 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900 rounded-lg transition-colors focus:outline-none hidden sm:flex shrink-0 cursor-pointer"
               title="System Settings"
+              aria-label="System settings"
               onClick={() => {
                 if (currentUser.role === UserRole.Administrator) {
                   onNavigate("roles"); // Admin Settings goes to roles matrix
@@ -161,37 +186,52 @@ export default function Header({
                 }
               }}
             >
-              <Settings className="w-5 h-5" />
+              <Settings className="w-5 h-5 pointer-events-none" />
             </button>
+
+            {/* Switch System Portal Button */}
+            {onSwitchSystem && (
+              <button
+                className="w-11 h-11 md:w-9 md:h-9 text-gray-500 hover:text-[#B22222] hover:bg-gray-100 dark:text-[#B22222] dark:hover:text-white dark:hover:bg-neutral-900 rounded-lg transition-colors focus:outline-none hidden sm:flex items-center justify-center shrink-0 cursor-pointer"
+                title="Switch System Portal"
+                aria-label="Switch system portal"
+                onClick={onSwitchSystem}
+              >
+                <ArrowLeftRight className="w-5 h-5 text-amber-600 dark:text-amber-400 pointer-events-none" />
+              </button>
+            )}
 
             <div className="h-6 w-px bg-gray-200 dark:bg-neutral-800" />
 
             {/* User Profile Card Dropdown Container */}
-            <div className="relative">
+            <div className="relative shrink-0">
               <button
                 onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
-                className="flex items-center gap-2.5 p-1.5 hover:bg-gray-100 dark:hover:bg-neutral-900 rounded-lg transition-all focus:outline-none text-left cursor-pointer"
+                className="flex items-center gap-2 p-1 hover:bg-gray-100 dark:hover:bg-neutral-900 rounded-lg transition-all focus:outline-none text-left cursor-pointer"
                 title="User Menu"
+                aria-label="User menu"
+                aria-expanded={isProfileMenuOpen}
+                aria-haspopup="true"
               >
-                <div className="w-9 h-9 rounded bg-gray-50 border border-gray-200 dark:bg-neutral-900 dark:border-neutral-850 overflow-hidden flex items-center justify-center shadow-inner">
+                <div className="w-9 h-9 rounded bg-gray-50 border border-gray-200 dark:bg-neutral-950 dark:border-neutral-850 overflow-hidden flex items-center justify-center shadow-inner pointer-events-none">
                   {currentUser.avatarUrl ? (
                     <img
                       src={currentUser.avatarUrl}
                       alt={currentUser.fullName}
-                      className="w-full h-full object-cover"
+                      className="w-full h-full object-cover pointer-events-none"
                       referrerPolicy="no-referrer"
                     />
                   ) : (
-                    <UserIcon className="w-4 h-4 text-gray-600 dark:text-neutral-400" />
+                    <UserIcon className="w-4 h-4 text-gray-600 dark:text-neutral-400 pointer-events-none" />
                   )}
                 </div>
-                <div className="text-left hidden sm:block">
-                  <p className="text-xs font-bold text-gray-800 dark:text-white truncate max-w-[140px]">
+                <div className="text-left hidden sm:block pointer-events-none">
+                  <p className="text-xs font-bold text-gray-800 dark:text-white truncate max-w-[140px] pointer-events-none">
                     {currentUser.fullName}
                   </p>
-                  <div className="flex items-center gap-1 mt-0.5">
-                    <Shield className="w-2.5 h-2.5 text-[#B22222]" />
-                    <span className="text-[9px] font-bold text-gray-500 dark:text-neutral-400 uppercase tracking-wider font-mono">
+                  <div className="flex items-center gap-1 mt-0.5 pointer-events-none">
+                    <Shield className="w-2.5 h-2.5 text-[#B22222] pointer-events-none" />
+                    <span className="text-[9px] font-bold text-gray-500 dark:text-neutral-400 uppercase tracking-wider font-mono pointer-events-none">
                       {currentUser.role}
                     </span>
                   </div>
@@ -213,25 +253,25 @@ export default function Header({
 
                     <button
                       onClick={() => handleProfileClick("profile")}
-                      className="w-full text-left px-4 py-2.5 hover:bg-gray-100 dark:hover:bg-neutral-800 flex items-center gap-2 text-gray-700 dark:text-neutral-300 hover:text-black dark:hover:text-white transition-colors"
+                      className="w-full text-left px-4 py-2.5 hover:bg-gray-100 dark:hover:bg-neutral-800 flex items-center gap-2 text-gray-700 dark:text-neutral-300 hover:text-black dark:hover:text-white transition-colors cursor-pointer"
                     >
-                      <UserCheck className="w-4 h-4 text-gray-400 dark:text-neutral-500" />
+                      <UserCheck className="w-4 h-4 text-gray-400 dark:text-neutral-500 pointer-events-none" />
                       <span>My Profile</span>
                     </button>
 
                     <button
                       onClick={() => handleProfileClick("settings")}
-                      className="w-full text-left px-4 py-2.5 hover:bg-gray-100 dark:hover:bg-neutral-800 flex items-center gap-2 text-gray-700 dark:text-neutral-300 hover:text-black dark:hover:text-white transition-colors"
+                      className="w-full text-left px-4 py-2.5 hover:bg-gray-100 dark:hover:bg-neutral-800 flex items-center gap-2 text-gray-700 dark:text-neutral-300 hover:text-black dark:hover:text-white transition-colors cursor-pointer"
                     >
-                      <Settings className="w-4 h-4 text-gray-400 dark:text-neutral-500" />
+                      <Settings className="w-4 h-4 text-gray-400 dark:text-neutral-500 pointer-events-none" />
                       <span>Account Settings</span>
                     </button>
 
                     <button
                       onClick={() => handleProfileClick("password")}
-                      className="w-full text-left px-4 py-2.5 hover:bg-gray-100 dark:hover:bg-neutral-800 flex items-center gap-2 text-gray-700 dark:text-neutral-300 hover:text-black dark:hover:text-white transition-colors"
+                      className="w-full text-left px-4 py-2.5 hover:bg-gray-100 dark:hover:bg-neutral-800 flex items-center gap-2 text-gray-700 dark:text-neutral-300 hover:text-black dark:hover:text-white transition-colors cursor-pointer"
                     >
-                      <KeyRound className="w-4 h-4 text-gray-400 dark:text-neutral-500" />
+                      <KeyRound className="w-4 h-4 text-gray-400 dark:text-neutral-500 pointer-events-none" />
                       <span>Change Password</span>
                     </button>
 
@@ -242,9 +282,9 @@ export default function Header({
                         setIsProfileMenuOpen(false);
                         onLogout();
                       }}
-                      className="w-full text-left px-4 py-2.5 hover:bg-rose-50 dark:hover:bg-rose-950/20 flex items-center gap-2 text-rose-600 dark:text-rose-400 font-semibold transition-colors"
+                      className="w-full text-left px-4 py-2.5 hover:bg-rose-50 dark:hover:bg-rose-950/20 flex items-center gap-2 text-rose-600 dark:text-rose-400 font-semibold transition-colors cursor-pointer"
                     >
-                      <LogOut className="w-4 h-4 text-rose-500" />
+                      <LogOut className="w-4 h-4 text-rose-500 pointer-events-none" />
                       <span>Sign Out</span>
                     </button>
                   </div>
@@ -257,96 +297,182 @@ export default function Header({
             {/* Logout Button */}
             <button
               onClick={onLogout}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-neutral-900 rounded-lg text-gray-500 dark:text-neutral-400 hover:text-[#B22222] transition-all focus:outline-none"
+              className="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center hover:bg-gray-100 dark:hover:bg-neutral-900 rounded-lg text-gray-500 dark:text-neutral-400 hover:text-[#B22222] transition-all focus:outline-none hidden sm:flex shrink-0 cursor-pointer"
               title="Logout from System"
+              aria-label="Sign out"
             >
-              <LogOut className="w-5 h-5" />
+              <LogOut className="w-5 h-5 pointer-events-none" />
             </button>
           </div>
         )}
-      </div>
-
-      {/* Navigation and System Operations Bar */}
+      </div>      {/* Navigation and System Operations Bar */}
       {currentUser && (
         <div className="lg:hidden bg-gray-50 border-t border-gray-200 dark:bg-neutral-950 dark:border-neutral-900 px-6 md:px-10 py-2 overflow-x-auto scrollbar-none flex items-center justify-between gap-2">
           <nav className="flex flex-nowrap items-center gap-1 md:gap-2 whitespace-nowrap">
-            <button
-              onClick={() => onNavigate("dashboard")}
-              className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
-                currentTab === "dashboard"
-                  ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
-                  : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
-              }`}
-            >
-              Dashboard
-            </button>
-            
-            <button
-              onClick={() => onNavigate("po-list")}
-              className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
-                currentTab === "po-list" || currentTab === "po-form"
-                  ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
-                  : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
-              }`}
-            >
-              Purchase Orders
-            </button>
+            {activeSystem === "tsd" ? (
+              <>
+                <button
+                  onClick={() => onNavigate("dashboard")}
+                  className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
+                    currentTab === "dashboard"
+                      ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
+                      : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
+                  }`}
+                >
+                  Dashboard
+                </button>
+                <button
+                  onClick={() => onNavigate("control-no")}
+                  className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
+                    currentTab === "control-no"
+                      ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
+                      : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
+                  }`}
+                >
+                  Control No
+                </button>
+                <button
+                  onClick={() => onNavigate("unloading-loading")}
+                  className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
+                    currentTab === "unloading-loading"
+                      ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
+                      : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
+                  }`}
+                >
+                  Unload/Load
+                </button>
+                <button
+                  onClick={() => onNavigate("hazardous-waste")}
+                  className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
+                    currentTab === "hazardous-waste"
+                      ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
+                      : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
+                  }`}
+                >
+                  Haz Waste
+                </button>
+                <button
+                  onClick={() => onNavigate("waste-movement")}
+                  className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
+                    currentTab === "waste-movement"
+                      ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
+                      : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
+                  }`}
+                >
+                  Movement
+                </button>
+                <button
+                  onClick={() => onNavigate("timestamp")}
+                  className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
+                    currentTab === "timestamp"
+                      ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
+                      : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
+                  }`}
+                >
+                  Timestamp
+                </button>
+                <button
+                  onClick={() => onNavigate("manifest-summary")}
+                  className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
+                    currentTab === "manifest-summary"
+                      ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
+                      : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
+                  }`}
+                >
+                  Manifest Sum
+                </button>
+                <button
+                  onClick={() => onNavigate("tsd-summary")}
+                  className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
+                    currentTab === "tsd-summary"
+                      ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
+                      : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
+                  }`}
+                >
+                  TSD Sum
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => onNavigate("dashboard")}
+                  className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
+                    currentTab === "dashboard"
+                      ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
+                      : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
+                  }`}
+                >
+                  Dashboard
+                </button>
+                
+                <button
+                  onClick={() => onNavigate("po-list")}
+                  className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
+                    currentTab === "po-list" || currentTab === "po-form"
+                      ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
+                      : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
+                  }`}
+                >
+                  Purchase Orders
+                </button>
 
-            <button
-              onClick={() => onNavigate("suppliers")}
-              className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
-                currentTab === "suppliers"
-                  ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
-                  : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
-              }`}
-            >
-              Suppliers
-            </button>
+                <button
+                  onClick={() => onNavigate("suppliers")}
+                  className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
+                    currentTab === "suppliers"
+                      ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
+                      : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
+                  }`}
+                >
+                  Suppliers
+                </button>
 
-            <button
-              onClick={() => onNavigate("pis")}
-              className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
-                currentTab === "pis"
-                  ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
-                  : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
-              }`}
-            >
-              PIS
-            </button>
+                <button
+                  onClick={() => onNavigate("pis")}
+                  className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
+                    currentTab === "pis"
+                      ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
+                      : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
+                  }`}
+                >
+                  PIS
+                </button>
 
-            <button
-              onClick={() => onNavigate("rfs")}
-              className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
-                currentTab === "rfs"
-                  ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
-                  : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
-              }`}
-            >
-              RFS
-            </button>
+                <button
+                  onClick={() => onNavigate("rfs")}
+                  className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
+                    currentTab === "rfs"
+                      ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
+                      : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
+                  }`}
+                >
+                  RFS
+                </button>
 
-            <button
-              onClick={() => onNavigate("canvass")}
-              className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
-                currentTab === "canvass"
-                  ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
-                  : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
-              }`}
-            >
-              Canvass
-            </button>
+                <button
+                  onClick={() => onNavigate("canvass")}
+                  className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
+                    currentTab === "canvass"
+                      ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
+                      : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
+                  }`}
+                >
+                  Canvass
+                </button>
 
-            {(currentUser.role === UserRole.Administrator || currentUser.role === UserRole.PurchasingStaff) && (
-              <button
-                onClick={() => onNavigate("rfs-approval")}
-                className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
-                  currentTab === "rfs-approval"
-                    ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
-                    : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
-                }`}
-              >
-                RFS Approval
-              </button>
+                {(currentUser.role === UserRole.Administrator || currentUser.role === UserRole.PurchasingStaff) && (
+                  <button
+                    onClick={() => onNavigate("rfs-approval")}
+                    className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
+                      currentTab === "rfs-approval"
+                        ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
+                        : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
+                    }`}
+                  >
+                    RFS Approval
+                  </button>
+                )}
+              </>
             )}
 
             {currentUser.role === UserRole.Administrator && (

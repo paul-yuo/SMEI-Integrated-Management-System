@@ -9,6 +9,7 @@ import { createServer as createViteServer } from "vite";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { db, hashPassword, UserDB, PurchaseOrderDB, AuditLogDB } from "./src/server/db.js";
+import { runExtractionPipeline } from "./src/server/extractionEngine.js";
 
 const app = express();
 const PORT = 3000;
@@ -370,7 +371,21 @@ app.get("/api/auth/me", authenticateToken, (req: AuthRequest, res) => {
   if (!user) {
     return res.status(404).json({ error: "User not found" });
   }
+
+  // Dynamically refresh JWT on active request to keep session alive for working users
+  const payload = {
+    id: user.id,
+    username: user.username,
+    fullName: user.fullName,
+    email: user.email,
+    role: req.user!.role,
+    department: user.department,
+    position: user.position
+  };
+  const refreshedToken = jwt.sign(payload, JWT_SECRET, { expiresIn: "1h" });
+
   res.json({
+    token: refreshedToken,
     user: {
       id: user.id,
       username: user.username,
@@ -744,8 +759,21 @@ app.post("/api/suppliers", authenticateToken, (req: AuthRequest, res) => {
     return res.status(400).json({ error: `Supplier '${trimmedName}' already exists.` });
   }
 
+  const existingSuppliers = db.getSuppliers();
+  let maxIdNum = 0;
+  existingSuppliers.forEach(s => {
+    const match = s.id.match(/^[sS]_?(\d+)$/);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      if (num > maxIdNum) {
+        maxIdNum = num;
+      }
+    }
+  });
+  const newId = `s${maxIdNum + 1}`;
+
   const newSupplier = {
-    id: `s_${Date.now()}`,
+    id: newId,
     name: trimmedName,
     attention,
     phone: phone || "",
@@ -860,8 +888,38 @@ app.delete("/api/suppliers/:id", authenticateToken, (req: AuthRequest, res) => {
   res.json({ success: true });
 });
 
+function getNextPONumber(): string {
+  const currentYear = new Date().getFullYear();
+  const prefix = `SMEI-${currentYear}-`;
+  const records = db.getPurchaseOrders();
+  let maxSeq = 0;
+  for (const r of records) {
+    if (r.poNumber && r.poNumber.startsWith(prefix)) {
+      const parts = r.poNumber.split("-");
+      const seqStr = parts[parts.length - 1];
+      const seq = parseInt(seqStr, 10);
+      if (!isNaN(seq) && seq > maxSeq) {
+        maxSeq = seq;
+      }
+    } else if (r.poNumber && r.poNumber.startsWith("SMEI-")) {
+      const parts = r.poNumber.split("-");
+      const seqStr = parts[parts.length - 1];
+      const seq = parseInt(seqStr, 10);
+      if (!isNaN(seq) && seq > maxSeq) {
+        maxSeq = seq;
+      }
+    }
+  }
+  const nextSeq = maxSeq + 1;
+  return `${prefix}${nextSeq.toString().padStart(4, "0")}`;
+}
+
 
 // 5. PURCHASE ORDERS (WITH FULL LIFECYCLE, DEPARTMENT & RECORD OWNERSHIP SECURITY)
+app.get("/api/pos/next-number", authenticateToken, (req: AuthRequest, res) => {
+  res.json({ nextNumber: getNextPONumber() });
+});
+
 app.get("/api/pos", authenticateToken, (req: AuthRequest, res) => {
   const user = req.user!;
   let pos = db.getPurchaseOrders();
@@ -1782,11 +1840,62 @@ app.delete("/api/canvass/:id", authenticateToken, (req: AuthRequest, res) => {
   res.json({ success: true });
 });
 
+// COMPLIANCE DOCUMENT CONTENT EXTRACTION ROUTE
+app.post("/api/compliance/extract", authenticateToken, async (req: AuthRequest, res) => {
+  const { fileName, fileType, fileData } = req.body;
+  const user = req.user!;
+
+  if (!fileName || !fileType || !fileData) {
+    return res.status(400).json({ error: "fileName, fileType, and fileData are required." });
+  }
+
+  const startTime = Date.now();
+
+  try {
+    const extracted = await runExtractionPipeline(fileName, fileType, fileData);
+    const extractionTimeMs = Date.now() - startTime;
+
+    // Log extraction audit log per Step 5 & Step 7 requirement
+    const auditMsg = `Extracted CA Ref [${extracted.caNumber}] from file [${fileName}] using [${extracted.method}] (Confidence: ${extracted.confidence}%, Time: ${extractionTimeMs}ms, Page: ${extracted.page || "N/A"})`;
+    logAudit(
+      user.id,
+      user.username,
+      user.role,
+      "Extract CA Number",
+      "Compliance",
+      "-",
+      "-",
+      auditMsg,
+      req
+    );
+
+    res.json({
+      ...extracted,
+      audit: {
+        extractionMethod: extracted.method,
+        confidence: extracted.confidence,
+        extractionTimeMs,
+        detectedPage: extracted.page,
+        originalFilename: fileName
+      }
+    });
+  } catch (error: any) {
+    console.error("Endpoint failure in CA Number extraction:", error);
+    res.status(500).json({
+      error: "Unable to detect CA Number. Please enter it manually.",
+      details: error.message || error
+    });
+  }
+});
+
 
 // ---------------- VITE MIDDLEWARE SETUP & BOOTSTRAP ----------------
 
 async function bootstrap() {
-  if (process.env.NODE_ENV !== "production") {
+  const isProd = process.env.NODE_ENV === "production" || 
+                 (process.argv[1] && (process.argv[1].endsWith(".cjs") || process.argv[1].includes("dist")));
+
+  if (!isProd) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",

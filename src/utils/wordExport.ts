@@ -79,14 +79,24 @@ const addUnderlineToPlaceholder = (xml: string, placeholder: string): string => 
 };
 
 /**
- * Merges split double-curly-braces {{...}} placeholders in the XML content.
+ * Merges split double-curly-braces {{...}} placeholders in the XML content safely and robustly.
  * Spelling grammar checks and formatting changes can cause Word to split placeholders 
  * across multiple elements, which breaks Docxtemplater parsing.
  */
 const cleanSplitPlaceholders = (xml: string): string => {
   let cleaned = xml.replace(/<w:proofErr\b[^>]*\/>/g, "");
   
-  // Matches placeholders split across runs, e.g. {{PART1</w:t></w:r>...<w:t>PART2}}
+  // Step 1: Merge split start and end brace characters separated by run/text boundaries
+  cleaned = cleaned.replace(/\{<\/w:t>(?:<[^>]+>|\s)*?<w:t\b[^>]*>\{/g, "{{");
+  cleaned = cleaned.replace(/\}<\/w:t>(?:<[^>]+>|\s)*?<w:t\b[^>]*>\}/g, "}}");
+  
+  // Step 2: Strip any intervening run/text boundaries inside curly braces
+  cleaned = cleaned.replace(/\{\{((?:(?!\{\{)[\s\S])*?)\}\}/g, (match, p1) => {
+    const stripped = p1.replace(/<\/w:t>[\s\S]*?<w:t\b[^>]*>/g, "");
+    return `{{${stripped}}}`;
+  });
+
+  // Step 3: Backward-compatibility check using splitRegex
   const splitRegex = /(\{\{[^}]+?)<\/w:t><\/w:r>(?:<w:proofErr\b[^>]*\/>)?<w:r\b[^>]*>(?:<w:rPr>[^]*?<\/w:rPr>)?<w:t\b[^>]*>([^}]*?\}\})/g;
   
   let prevCleaned;
@@ -218,6 +228,7 @@ export const exportPOToWord = async (po: PurchaseOrder) => {
   const descLines: string[] = [];
   const priceLines: string[] = [];
   const amountLines: string[] = [];
+  const items: any[] = [];
 
   let totalDescLines = 0;
   const MAX_TOTAL_DESC_LINES = 18; // Max description lines allowed across all items on 1 page
@@ -242,6 +253,15 @@ export const exportPOToWord = async (po: PurchaseOrder) => {
     descLines.push(desc);
     priceLines.push(formatCurrency(item.unitPrice, symbol));
     amountLines.push(formatCurrency(item.amount, symbol));
+
+    // Add clean item for the looping mechanism
+    items.push({
+      quantity: String(item.quantity || ""),
+      unit: item.unit || "",
+      description: desc,
+      unitPrice: formatCurrency(item.unitPrice, symbol),
+      amount: formatCurrency(item.amount, symbol)
+    });
 
     // Align other columns by padding them with extra empty lines to match description's wrapped lines
     for (let pad = 1; pad < lCount; pad++) {
@@ -310,15 +330,19 @@ export const exportPOToWord = async (po: PurchaseOrder) => {
     UNIT_PRICE,
     AMOUNT,
 
+    items,
+
     VATABLE_AMOUNT: po.category?.toLowerCase().includes("vatable") ? formatCurrency(po.vatableAmount, symbol) : "",
     VAT_AMOUNT: po.category?.toLowerCase().includes("vatable") ? formatCurrency(po.vat12, symbol) : "",
     VAT_EXEMPT_AMOUNT: po.category?.toLowerCase().includes("exempt") ? formatCurrency(po.vatExemptAmount, symbol) : "",
     ZERO_RATED_AMOUNT: po.category?.toLowerCase().includes("zero") ? formatCurrency(po.zeroRatedAmount, symbol) : "",
     TOTAL_AMOUNT: formatCurrency(po.totalAmount, symbol),
     GROSS_AMOUNT: formatCurrency(po.grossAmount || po.totalAmount, symbol),
-    PARTS_EWT: po.partsEwt1 > 0 ? formatCurrency(po.partsEwt1, symbol) : "",
-    LABOR_EWT: po.laborEwt2 > 0 ? formatCurrency(po.laborEwt2, symbol) : "",
-    DISCOUNT_VAT_AMOUNT: po.discountVatAmount > 0 ? formatCurrency(po.discountVatAmount, symbol) : "",
+    PARTS_EWT: (po.partsEwt1 && po.partsEwt1 > 0) ? formatCurrency(po.partsEwt1, symbol) : "",
+    LABOR_EWT: (po.laborEwt2 && po.laborEwt2 > 0) ? formatCurrency(po.laborEwt2, symbol) : "",
+    EWT_TYPE: po.ewtType ?? "",
+    EWT_PERCENTAGE: (po.ewtPercentage !== undefined && po.ewtPercentage !== null) ? `${po.ewtPercentage}%` : "",
+    DISCOUNT_VAT_AMOUNT: (po.discountVatAmount && po.discountVatAmount > 0) ? formatCurrency(po.discountVatAmount, symbol) : "",
 
     PAYMENT_TERMS: po.paymentTerms ?? "N/A",
     WORK_DURATION: po.workDuration ?? "N/A",

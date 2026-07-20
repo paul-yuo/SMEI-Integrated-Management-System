@@ -8,9 +8,9 @@ import { CanvassSheet, CanvassItem, User, UserRole } from "../types";
 import { api } from "../lib/api";
 import { Search, Plus, Trash2, Edit3, Eye, FileText, X, Calculator, PlusCircle } from "lucide-react";
 import { exportWordWithTemplate, exportExcelWithTemplate } from "../utils/templateExport";
-import { ExportWordButton, CreateButton } from "./SharedButtons";
+import { mapCanvassData } from "../utils/templateMapping";
+import { ExportWordButton, CreateButton, ExportPdfButton } from "./SharedButtons";
 import { TableSkeleton } from "./ui/Skeleton";
-import DocumentPreview from "./DocumentPreview";
 
 interface CanvassModuleProps {
   currentUser: User;
@@ -81,8 +81,13 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
       if (data && data.length > 0 && !activeSheetId) {
         setActiveSheetId(data[data.length - 1].id);
       }
-    } catch (err) {
-      console.error("Error fetching canvass sheets:", err);
+    } catch (err: any) {
+      const errMsg = err?.message || String(err);
+      if (errMsg.includes("Session expired") || errMsg.includes("unauthorized") || errMsg.includes("token")) {
+        console.warn("Canvass fetch unauthorized or session expired (handled globally):", errMsg);
+      } else {
+        console.error("Error fetching canvass sheets:", errMsg);
+      }
     } finally {
       setLoading(false);
     }
@@ -107,13 +112,8 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
   const supplierCalculations = useMemo(() => {
     return suppliers.map((s) => {
       const sum = parts.reduce((acc, p) => acc + (Number(p.prices[s.id]) || 0), 0);
-      const isNonVat = !!s.isNonVat;
-      const rateStr = s.nonVatRate || "1%";
-      const ratePercent = parseFloat(rateStr.replace("%", "")) / 100;
-      const rate = isNaN(ratePercent) ? 0.01 : ratePercent;
-      
-      const vat = isNonVat ? sum * rate : sum * 0.12;
-      const total = sum + vat;
+      const vat = 0;
+      const total = sum;
       return {
         supplierId: s.id,
         sum,
@@ -302,15 +302,6 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
           warranty: "",
           paymentTerms: "",
         },
-        {
-          id: "supplier_2",
-          name: "Supplier B",
-          contactPerson: "",
-          contactNo: "",
-          workDuration: "",
-          warranty: "",
-          paymentTerms: "",
-        },
       ]);
 
       setParts([
@@ -319,7 +310,6 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
           description: "",
           prices: {
             supplier_1: 0,
-            supplier_2: 0,
           },
         },
       ]);
@@ -554,7 +544,7 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
 
   // Export Compatibility Handler
   const handleExport = async (sheet: CanvassSheet, format: "word" | "excel") => {
-    const sList: FormSupplier[] = sheet.suppliersList || [
+    const sList: FormSupplier[] = sheet.suppliersList || sheet.shops || [
       {
         id: "supplier_1",
         name: sheet.shopName1 || sheet.supplierName || "Supplier A",
@@ -578,7 +568,7 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
     const s0 = sList[0] || { id: "s0", name: "", contactPerson: "", contactNo: "", workDuration: "", warranty: "", paymentTerms: "" };
     const s1 = sList[1] || { id: "s1", name: "", contactPerson: "", contactNo: "", workDuration: "", warranty: "", paymentTerms: "" };
 
-    const pList: FormPart[] = sheet.partsList || (sheet.items || []).map((it, idx) => ({
+    const pList: FormPart[] = sheet.partsList || sheet.parts || (sheet.items || []).map((it, idx) => ({
       id: it.id || `p_${idx}`,
       description: it.item,
       prices: {
@@ -587,111 +577,18 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
       },
     }));
 
-    const total_shop1 = pList.reduce((sum, p) => sum + (Number(p.prices[s0.id]) || 0), 0);
-    const total_shop2 = pList.reduce((sum, p) => sum + (Number(p.prices[s1.id]) || 0), 0);
-
-    const isNonVat1 = !!s0.isNonVat;
-    const ratePercent1 = parseFloat((s0.nonVatRate || "1%").replace("%", "")) / 100;
-    const rate1 = isNonVat1 ? (isNaN(ratePercent1) ? 0.01 : ratePercent1) : 0.12;
-    const vat1 = total_shop1 * rate1;
-
-    const isNonVat2 = !!s1.isNonVat;
-    const ratePercent2 = parseFloat((s1.nonVatRate || "1%").replace("%", "")) / 100;
-    const rate2 = isNonVat2 ? (isNaN(ratePercent2) ? 0.01 : ratePercent2) : 0.12;
-    const vat2 = total_shop2 * rate2;
-
-    const total_amount1 = total_shop1 + vat1;
-    const total_amount2 = total_shop2 + vat2;
-
-    const formatCurrency = (val: number) => {
-      return new Intl.NumberFormat("en-PH", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }).format(val);
+    // Reconstruct sheet data with rich dynamic data models to feed into single source of truth mapper
+    const sheetToMap: CanvassSheet = {
+      ...sheet,
+      shops: sList,
+      parts: pList,
     };
 
-    const exportData = {
-      Control_NO: sheet.canvassNumber,
-      Category: sheet.category || "General Procurement",
-      Plate_No: sheet.plateNo || "N/A",
-
-      shop_name1: s0.name || "",
-      shop_name2: s1.name || "",
-
-      contact_person1: s0.contactPerson || "",
-      contact_person2: s1.contactPerson || "",
-
-      contact_no1: s0.contactNo || "",
-      contact_no2: s1.contactNo || "",
-
-      remarks: sheet.remarks || "",
-
-      work_duration1: s0.workDuration || "",
-      work_duration2: s1.workDuration || "",
-
-      warranty1: s0.warranty || "",
-      warranty2: s1.warranty || "",
-
-      payment_terms1: s0.paymentTerms || "",
-      payment_terms2: s1.paymentTerms || "",
-
-      parts1: pList.map((p) => p.description).join("\n"),
-      parts_shop1_price1: pList.map((p) => (p.prices[s0.id] ? formatCurrency(p.prices[s0.id]) : "-")).join("\n"),
-      parts_shop2_price2: pList.map((p) => (p.prices[s1.id] ? formatCurrency(p.prices[s1.id]) : "-")).join("\n"),
-
-      total_shop1: formatCurrency(total_shop1),
-      total_shop2: formatCurrency(total_shop2),
-
-      vat1: formatCurrency(vat1),
-      vat2: formatCurrency(vat2),
-
-      total_amount1: formatCurrency(total_amount1),
-      total_amount2: formatCurrency(total_amount2),
-
-      PREPARED_BY: sheet.requestedBy || "",
-      PREPARED_BY_POSITION: sheet.preparedByPosition || "Canvasser",
-      CHECKED_BY: sheet.checkedBy || "",
-      CHECKED_BY_POSITION: sheet.checkedByPosition || "Maintenance Supervisor",
-      VERIFIED_BY: sheet.verifiedBy || "",
-      VERIFIED_BY_POSITION: sheet.verifiedByPosition || "Operations Manager",
-      APPROVED_BY: sheet.approvedBy || "",
-      APPROVED_BY_POSITION: sheet.approvedByPosition || "Purchasing Manager",
-    };
+    const { exportData, excelShops, excelItems } = mapCanvassData(sheetToMap);
 
     if (format === "word") {
       await exportWordWithTemplate("CANVASS_TEMPLATE.docx", exportData, `${sheet.canvassNumber}_SMEI_CANVASS.docx`);
     } else {
-      // Build shops data array for Excel advanced cloner
-      const excelShops = sList.map((s) => {
-        const t = pList.reduce((sum, p) => sum + (Number(p.prices[s.id]) || 0), 0);
-        const isNonVat = !!s.isNonVat;
-        const ratePercent = parseFloat((s.nonVatRate || "1%").replace("%", "")) / 100;
-        const rate = isNonVat ? (isNaN(ratePercent) ? 0.01 : ratePercent) : 0.12;
-        const v = t * rate;
-        return {
-          name: s.name || "N/A",
-          contact_person: s.contactPerson || "N/A",
-          contact_no: s.contactNo || "N/A",
-          work_duration: s.workDuration || "N/A",
-          warranty: s.warranty || "N/A",
-          payment_terms: s.paymentTerms || "N/A",
-          prices: pList.map((p) => p.prices[s.id] || 0),
-          total: t,
-          vat: v,
-          total_amount: t + v,
-        };
-      });
-
-      const excelItems = pList.map((p, idx) => ({
-        index: idx + 1,
-        item: p.description,
-        quantity: 1,
-        unit: "pcs",
-        supplierAPrice: p.prices[s0.id] || 0,
-        supplierBPrice: p.prices[s1.id] || 0,
-        supplierCPrice: (sList[2] && p.prices[sList[2].id]) || 0,
-      }));
-
       await exportExcelWithTemplate(
         "CANVASS_TEMPLATE.xlsx",
         { ...exportData, shops: excelShops },
@@ -711,48 +608,82 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
     handleExport(active, "word");
   };
 
+  const handleTriggerPDFExport = async () => {
+    const active = sheets.find((s) => s.id === activeSheetId);
+    if (active) {
+      try {
+        const { printDocument } = await import("../utils/printDocument");
+        await printDocument("canvass", active);
+      } catch (err: any) {
+        alert("Failed to print: " + (err.message || err));
+      }
+    } else {
+      alert("Please select a Canvass Sheet first.");
+    }
+  };
+
   return (
-    <div id="smei-canvass-list" className="p-6 md:p-10 space-y-6 max-w-[130rem] mx-auto w-full">
+    <div id="smei-canvass-list" className="p-4 md:p-6 space-y-4 max-w-[130rem] mx-auto w-full">
       {/* Upper Action Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800 tracking-tight font-display">Canvass Sheets Directory</h2>
-          <p className="text-sm text-gray-500 mt-0.5">Compare supplier bids, compute VAT/Non-VAT compliance, and determine optimal sourcing</p>
+          <h2 className="text-xl md:text-2xl font-bold text-gray-800 tracking-tight font-display">Canvass Sheets Directory</h2>
+          <p className="text-xs md:text-sm text-gray-500 mt-0.5">Compare supplier bids, compute VAT/Non-VAT compliance, and determine optimal sourcing</p>
         </div>
-      </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden" id="canvass-module-root">
-      {/* Search and Filters Header */}
-      <div className="p-6 border-b border-gray-100 bg-gray-50/50 flex flex-col gap-4">
-        <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="relative w-full md:w-96">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search Canvass Number, Supplier, Recommended..."
-              className="pl-9 pr-4 py-2 w-full text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-smei-crimson focus:border-transparent outline-none transition-all"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4 w-full md:w-auto md:justify-end">
+          {activeSheetId && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-gray-500 uppercase font-mono tracking-wider">Selected:</span>
+              <span className="text-[11px] font-bold font-mono text-smei-crimson bg-red-50 border border-red-200 px-2.5 py-1 rounded-md">
+                {sheets.find((s) => s.id === activeSheetId)?.canvassNumber || ""}
+              </span>
+            </div>
+          )}
 
-          <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto justify-end">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
             <ExportWordButton
               onClick={handleExportWord}
               disabled={!activeSheetId}
-              selectedText={sheets.find((s) => s.id === activeSheetId)?.canvassNumber || ""}
             />
-            {isAuthorized && <CreateButton onClick={() => handleOpenModal(null)} label="Create Canvass Sheet" />}
+            <ExportPdfButton
+              onClick={handleTriggerPDFExport}
+              disabled={!activeSheetId}
+            />
+            {isAuthorized && (
+              <CreateButton onClick={() => handleOpenModal(null)} label="Create Canvass" />
+            )}
           </div>
         </div>
       </div>
 
-      {/* Split Layout for Canvass Grid and Live Preview */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start p-6">
-        {/* Left Column: Canvass Table (Expanded to 58.33% / col-span-7 for enterprise screens) */}
-        <div className="lg:col-span-7 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[calc(100vh-280px)] min-h-[500px]">
-          <div className="overflow-x-auto flex-1 overflow-y-auto">
-            <table className="w-full text-left border-collapse">
+      {/* Full Width Layout for Canvass Grid */}
+      <div className="w-full flex flex-col gap-4 h-[calc(100vh-170px)] min-h-[650px]">
+        
+        {/* Compressed Search and Filters Board */}
+        <div className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
+            <div className="grid grid-cols-1 gap-2.5">
+              {/* Search Keywords */}
+              <div className="space-y-0.5">
+                <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Search Keywords</label>
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search Canvass Number, Supplier, Recommended..."
+                    className="w-full pl-7.5 pr-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-sans focus:outline-none focus:ring-1 focus:ring-smei-crimson focus:border-transparent focus:bg-white transition-all text-gray-700"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Table Container */}
+          <div className="flex-1 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
+            <div className="w-full overflow-x-auto flex-1 overflow-y-auto">
+            <table className="w-full text-left border-collapse min-w-[800px]">
               <thead className="sticky top-0 bg-white z-10 shadow-sm">
                 <tr className="bg-red-50/20 text-gray-600 border-b border-gray-100 text-[11px] font-bold uppercase tracking-wider">
                   <th className="py-4 px-6">Canvass Number</th>
@@ -856,28 +787,12 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
             </table>
           </div>
         </div>
-
-        {/* Right Column: Live Document Preview (Set to 41.67% / col-span-5 to balance layout) */}
-        <div className="lg:col-span-5 h-[calc(100vh-280px)] min-h-[500px] sticky top-6">
-          {sheets.find((s) => s.id === activeSheetId) ? (
-            <DocumentPreview
-              moduleName="canvass"
-              format="excel"
-              data={sheets.find((s) => s.id === activeSheetId)}
-            />
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full bg-slate-50 border border-slate-200 border-dashed rounded-xl p-8 text-slate-400">
-              <FileText className="w-12 h-12 text-slate-300 mb-2 animate-pulse" />
-              <p className="text-sm font-medium">Select a canvass sheet to display live preview</p>
-            </div>
-          )}
-        </div>
       </div>
 
       {/* Rebuilt, High-Fidelity Modal Dialog */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 flex items-center justify-center p-4 backdrop-blur-xs">
-          <div className="bg-white rounded-xl shadow-xl border border-gray-100 w-full max-w-7xl overflow-hidden transition-all scale-100">
+          <div className="bg-white rounded-xl shadow-xl border border-gray-100 w-full max-w-3xl overflow-hidden transition-all scale-100">
             <div className="bg-smei-crimson text-white px-6 py-4 flex items-center justify-between">
               <div>
                 <h3 className="text-base font-bold uppercase tracking-wide">
@@ -890,9 +805,9 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
               </button>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 max-h-[80vh] overflow-y-auto">
-              {/* Left Column: Form Editor */}
-              <div className="lg:col-span-6">
+            <div className="p-6 max-h-[80vh] overflow-y-auto">
+              {/* Form Editor */}
+              <div className="w-full">
                 <form onSubmit={handleSubmit} className="space-y-6">
               {errors.server && (
                 <div className="bg-rose-50 border-l-4 border-rose-500 text-rose-700 text-xs p-3 rounded-md font-medium">
@@ -909,11 +824,11 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   {/* Document No. */}
                   <div>
-                    <label className="block text-xs font-bold text-gray-700 mb-1">Document No. *</label>
+                    <label className="block text-xs font-bold text-gray-700 mb-1.5">Document No. *</label>
                     <input
                       type="text"
                       disabled={!isEditMode}
-                      className="w-full text-sm font-semibold p-2 border border-gray-200 rounded-lg bg-gray-50/50 focus:ring-1 focus:ring-smei-crimson outline-none"
+                      className="w-full text-xs font-semibold p-2.5 border border-gray-200 rounded-xl bg-gray-50 text-gray-500 cursor-not-allowed outline-none"
                       value="FM-PPD-04"
                       readOnly
                     />
@@ -921,13 +836,13 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
 
                   {/* Control No. */}
                   <div>
-                    <label className="block text-xs font-bold text-gray-700 mb-1">Control No. *</label>
+                    <label className="block text-xs font-bold text-gray-700 mb-1.5">Control No. *</label>
                     <input
                       type="text"
                       required
                       disabled={!isEditMode}
-                      className={`w-full text-sm font-mono font-semibold p-2 border rounded-lg focus:ring-1 focus:ring-smei-crimson outline-none ${
-                        errors.canvassNumber ? "border-rose-500 bg-rose-50/20 animate-pulse" : "border-gray-200 bg-gray-50/30"
+                      className={`w-full text-xs font-mono font-semibold p-2.5 border rounded-xl focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none transition-all ${
+                        errors.canvassNumber ? "border-rose-500 bg-rose-50/20 animate-pulse" : "border-gray-200 bg-white"
                       }`}
                       value={canvassNumber}
                       onChange={(e) => setCanvassNumber(e.target.value)}
@@ -938,12 +853,12 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
 
                   {/* Category */}
                   <div>
-                    <label className="block text-xs font-bold text-gray-700 mb-1">Category (Plate/Category) *</label>
+                    <label className="block text-xs font-bold text-gray-700 mb-1.5">Category *</label>
                     <input
                       type="text"
                       required
                       disabled={!isEditMode}
-                      className="w-full text-sm p-2 border border-gray-200 rounded-lg focus:ring-1 focus:ring-smei-crimson outline-none"
+                      className="w-full text-xs font-semibold p-2.5 border border-gray-200 rounded-xl bg-white focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none transition-all"
                       value={category}
                       onChange={(e) => setCategory(e.target.value)}
                       placeholder="e.g. Spare Parts"
@@ -952,12 +867,12 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
 
                   {/* Plate No. */}
                   <div>
-                    <label className="block text-xs font-bold text-gray-700 mb-1">Plate No. *</label>
+                    <label className="block text-xs font-bold text-gray-700 mb-1.5">Plate No. *</label>
                     <input
                       type="text"
                       required
                       disabled={!isEditMode}
-                      className="w-full text-sm p-2 border border-gray-200 rounded-lg focus:ring-1 focus:ring-smei-crimson outline-none"
+                      className="w-full text-xs font-semibold p-2.5 border border-gray-200 rounded-xl bg-white focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none transition-all"
                       value={plateNo}
                       onChange={(e) => setPlateNo(e.target.value)}
                       placeholder="e.g. ABC-1234"
@@ -1005,15 +920,15 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
                         Supplier Option {idx + 1}
                       </span>
 
-                      <div className="space-y-2">
+                      <div className="space-y-2.5">
                         {/* Supplier Name */}
                         <div>
-                          <label className="block text-[10px] font-bold text-gray-500 mb-0.5">Supplier Name *</label>
+                          <label className="block text-[10px] font-bold text-gray-500 mb-1">Supplier Name *</label>
                           <input
                             type="text"
                             required
                             disabled={!isEditMode}
-                            className={`w-full text-xs p-2 border rounded-md outline-none focus:ring-1 focus:ring-smei-crimson ${
+                            className={`w-full text-xs font-semibold p-2 border rounded-xl outline-none focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson transition-all ${
                               errors[`supplier_name_${s.id}`] ? "border-rose-400 bg-rose-50/20" : "border-gray-200 bg-white"
                             }`}
                             value={s.name}
@@ -1027,11 +942,11 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
 
                         {/* Contact Person */}
                         <div>
-                          <label className="block text-[10px] font-bold text-gray-500 mb-0.5">Contact Person</label>
+                          <label className="block text-[10px] font-bold text-gray-500 mb-1">Contact Person</label>
                           <input
                             type="text"
                             disabled={!isEditMode}
-                            className="w-full text-xs p-2 border border-gray-200 rounded-md bg-white focus:ring-1 focus:ring-smei-crimson outline-none"
+                            className="w-full text-xs font-semibold p-2 border border-gray-200 rounded-xl bg-white focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none transition-all"
                             value={s.contactPerson}
                             onChange={(e) => handleSupplierChange(s.id, "contactPerson", e.target.value)}
                             placeholder="Full name of contact"
@@ -1040,11 +955,11 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
 
                         {/* Contact No. */}
                         <div>
-                          <label className="block text-[10px] font-bold text-gray-500 mb-0.5">Contact No.</label>
+                          <label className="block text-[10px] font-bold text-gray-500 mb-1">Contact No.</label>
                           <input
                             type="text"
                             disabled={!isEditMode}
-                            className="w-full text-xs p-2 border border-gray-200 rounded-md bg-white focus:ring-1 focus:ring-smei-crimson outline-none font-mono"
+                            className="w-full text-xs font-semibold p-2 border border-gray-200 rounded-xl bg-white focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none font-mono transition-all"
                             value={s.contactNo}
                             onChange={(e) => handleSupplierChange(s.id, "contactNo", e.target.value)}
                             placeholder="Phone or Mobile number"
@@ -1053,11 +968,11 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
 
                         {/* Work Duration */}
                         <div>
-                          <label className="block text-[10px] font-bold text-gray-500 mb-0.5">Work Duration</label>
+                          <label className="block text-[10px] font-bold text-gray-500 mb-1">Work Duration</label>
                           <input
                             type="text"
                             disabled={!isEditMode}
-                            className="w-full text-xs p-2 border border-gray-200 rounded-md bg-white focus:ring-1 focus:ring-smei-crimson outline-none"
+                            className="w-full text-xs font-semibold p-2 border border-gray-200 rounded-xl bg-white focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none transition-all"
                             value={s.workDuration}
                             onChange={(e) => handleSupplierChange(s.id, "workDuration", e.target.value)}
                             placeholder="e.g. 3-5 Working Days"
@@ -1066,11 +981,11 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
 
                         {/* Warranty */}
                         <div>
-                          <label className="block text-[10px] font-bold text-gray-500 mb-0.5">Warranty</label>
+                          <label className="block text-[10px] font-bold text-gray-500 mb-1">Warranty</label>
                           <input
                             type="text"
                             disabled={!isEditMode}
-                            className="w-full text-xs p-2 border border-gray-200 rounded-md bg-white focus:ring-1 focus:ring-smei-crimson outline-none"
+                            className="w-full text-xs font-semibold p-2 border border-gray-200 rounded-xl bg-white focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none transition-all"
                             value={s.warranty}
                             onChange={(e) => handleSupplierChange(s.id, "warranty", e.target.value)}
                             placeholder="e.g. 1 Year against defects"
@@ -1079,47 +994,17 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
 
                         {/* Payment Terms */}
                         <div>
-                          <label className="block text-[10px] font-bold text-gray-500 mb-0.5">Payment Terms</label>
+                          <label className="block text-[10px] font-bold text-gray-500 mb-1">Payment Terms</label>
                           <input
                             type="text"
                             disabled={!isEditMode}
-                            className="w-full text-xs p-2 border border-gray-200 rounded-md bg-white focus:ring-1 focus:ring-smei-crimson outline-none"
+                            className="w-full text-xs font-semibold p-2 border border-gray-200 rounded-xl bg-white focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none transition-all"
                             value={s.paymentTerms}
                             onChange={(e) => handleSupplierChange(s.id, "paymentTerms", e.target.value)}
                             placeholder="e.g. Net 30 Days"
                           />
                         </div>
 
-                        {/* Non-VAT options */}
-                        <div className="pt-2 border-t border-gray-100 flex items-center justify-between gap-2">
-                          <label className="flex items-center gap-1.5 cursor-pointer text-[10px] font-bold text-gray-600">
-                            <input
-                              type="checkbox"
-                              disabled={!isEditMode}
-                              checked={!!s.isNonVat}
-                              onChange={(e) => {
-                                handleSupplierChange(s.id, "isNonVat", e.target.checked);
-                                if (e.target.checked && !s.nonVatRate) {
-                                  handleSupplierChange(s.id, "nonVatRate", "1%");
-                                }
-                              }}
-                              className="rounded border-gray-300 text-smei-crimson focus:ring-smei-crimson"
-                            />
-                            <span>Non-VAT Supplier</span>
-                          </label>
-                          {!!s.isNonVat && (
-                            <div className="flex items-center gap-1 w-20">
-                              <input
-                                type="text"
-                                disabled={!isEditMode}
-                                className="w-full text-center text-[10px] p-1 border border-gray-200 rounded bg-white focus:ring-1 focus:ring-smei-crimson outline-none font-bold"
-                                value={s.nonVatRate || "1%"}
-                                onChange={(e) => handleSupplierChange(s.id, "nonVatRate", e.target.value)}
-                                placeholder="1%"
-                              />
-                            </div>
-                          )}
-                        </div>
                       </div>
                     </div>
                   ))}
@@ -1199,10 +1084,10 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
                                       type="number"
                                       step="any"
                                       disabled={!isEditMode}
-                                      className={`w-32 text-xs p-1.5 border rounded-md text-right focus:ring-1 focus:ring-smei-crimson outline-none ${
+                                      className={`w-full min-w-[5.5rem] text-xs p-1.5 border rounded-xl text-right focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none transition-all ${
                                         isLowest
                                           ? "border-emerald-300 text-emerald-800 bg-emerald-50/30 font-bold"
-                                          : "border-gray-200"
+                                          : "border-gray-200 bg-white"
                                       }`}
                                       value={p.prices[s.id] === 0 ? "" : p.prices[s.id]}
                                       onChange={(e) => handlePartPriceChange(p.id, s.id, e.target.value === "" ? 0 : Number(e.target.value))}
@@ -1249,33 +1134,10 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
                         {isEditMode && <td />}
                       </tr>
 
-                      {/* SUMMARY ROW: VAT / Non-VAT */}
-                      <tr className="bg-gray-50/50 text-[11px] font-bold text-gray-700">
-                        <td colSpan={2} className="py-3 px-4 text-right uppercase tracking-wider">
-                          Tax (VAT 12% / Non-VAT):
-                        </td>
-                        {suppliers.map((s) => {
-                          const calc = supplierCalculations.find((c) => c.supplierId === s.id);
-                          return (
-                            <td key={s.id} className="py-3 px-4 text-right font-mono text-gray-900">
-                              <span className="text-[9px] text-gray-400 mr-1 font-sans">
-                                ({s.isNonVat ? `Non-VAT ${s.nonVatRate || "1%"}` : "VAT 12%"})
-                              </span>
-                              {new Intl.NumberFormat("en-PH", {
-                                style: "currency",
-                                currency: "PHP",
-                                minimumFractionDigits: 2,
-                              }).format(calc ? calc.vat : 0)}
-                            </td>
-                          );
-                        })}
-                        {isEditMode && <td />}
-                      </tr>
-
                       {/* SUMMARY ROW: TOTAL AMOUNT */}
                       <tr className="bg-red-50/10 text-[11px] font-extrabold text-smei-crimson border-b border-gray-200">
                         <td colSpan={2} className="py-3.5 px-4 text-right uppercase tracking-wider">
-                          Total Amount (Parts + Tax):
+                          Total Amount:
                         </td>
                         {suppliers.map((s) => {
                           const calc = supplierCalculations.find((c) => c.supplierId === s.id);
@@ -1352,13 +1214,13 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
 
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   {/* Prepared By */}
-                  <div className="space-y-1.5 p-3 border border-gray-100 bg-gray-50/30 rounded-xl">
+                  <div className="space-y-2 p-3.5 border border-gray-100 bg-gray-50/50 rounded-xl">
                     <span className="block text-[10px] uppercase font-bold text-gray-500 tracking-wider">1. Prepared By</span>
                     <div>
                       <input
                         type="text"
                         disabled={!isEditMode}
-                        className="w-full text-xs p-2 border rounded-md font-semibold border-gray-200"
+                        className="w-full text-xs font-semibold p-2.5 border rounded-xl border-gray-200 bg-white focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none transition-all"
                         value={preparedBy}
                         onChange={(e) => setPreparedBy(e.target.value)}
                         placeholder="Prepared By Name"
@@ -1368,7 +1230,7 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
                       <input
                         type="text"
                         disabled={!isEditMode}
-                        className="w-full text-[10px] p-1.5 border rounded-md border-gray-200"
+                        className="w-full text-[11px] font-semibold p-2 border rounded-xl border-gray-200 bg-white text-gray-600 focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none transition-all"
                         value={preparedByPosition}
                         onChange={(e) => setPreparedByPosition(e.target.value)}
                         placeholder="Prepared By Position"
@@ -1377,13 +1239,13 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
                   </div>
 
                   {/* Checked By */}
-                  <div className="space-y-1.5 p-3 border border-gray-100 bg-gray-50/30 rounded-xl">
+                  <div className="space-y-2 p-3.5 border border-gray-100 bg-gray-50/50 rounded-xl">
                     <span className="block text-[10px] uppercase font-bold text-gray-500 tracking-wider">2. Checked By</span>
                     <div>
                       <input
                         type="text"
                         disabled={!isEditMode}
-                        className="w-full text-xs p-2 border rounded-md font-semibold border-gray-200"
+                        className="w-full text-xs font-semibold p-2.5 border rounded-xl border-gray-200 bg-white focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none transition-all"
                         value={checkedBy}
                         onChange={(e) => setCheckedBy(e.target.value)}
                         placeholder="Checked By Name"
@@ -1393,7 +1255,7 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
                       <input
                         type="text"
                         disabled={!isEditMode}
-                        className="w-full text-[10px] p-1.5 border rounded-md border-gray-200"
+                        className="w-full text-[11px] font-semibold p-2 border rounded-xl border-gray-200 bg-white text-gray-600 focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none transition-all"
                         value={checkedByPosition}
                         onChange={(e) => setCheckedByPosition(e.target.value)}
                         placeholder="Checked By Position"
@@ -1402,13 +1264,13 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
                   </div>
 
                   {/* Verified By */}
-                  <div className="space-y-1.5 p-3 border border-gray-100 bg-gray-50/30 rounded-xl">
+                  <div className="space-y-2 p-3.5 border border-gray-100 bg-gray-50/50 rounded-xl">
                     <span className="block text-[10px] uppercase font-bold text-gray-500 tracking-wider">3. Verified By</span>
                     <div>
                       <input
                         type="text"
                         disabled={!isEditMode}
-                        className="w-full text-xs p-2 border rounded-md font-semibold border-gray-200"
+                        className="w-full text-xs font-semibold p-2.5 border rounded-xl border-gray-200 bg-white focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none transition-all"
                         value={verifiedBy}
                         onChange={(e) => setVerifiedBy(e.target.value)}
                         placeholder="Verified By Name"
@@ -1418,7 +1280,7 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
                       <input
                         type="text"
                         disabled={!isEditMode}
-                        className="w-full text-[10px] p-1.5 border rounded-md border-gray-200"
+                        className="w-full text-[11px] font-semibold p-2 border rounded-xl border-gray-200 bg-white text-gray-600 focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none transition-all"
                         value={verifiedByPosition}
                         onChange={(e) => setVerifiedByPosition(e.target.value)}
                         placeholder="Verified By Position"
@@ -1427,13 +1289,13 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
                   </div>
 
                   {/* Approved By */}
-                  <div className="space-y-1.5 p-3 border border-gray-100 bg-gray-50/30 rounded-xl">
+                  <div className="space-y-2 p-3.5 border border-gray-100 bg-gray-50/50 rounded-xl">
                     <span className="block text-[10px] uppercase font-bold text-gray-500 tracking-wider">4. Approved By</span>
                     <div>
                       <input
                         type="text"
                         disabled={!isEditMode}
-                        className="w-full text-xs p-2 border rounded-md font-semibold border-gray-200"
+                        className="w-full text-xs font-semibold p-2.5 border rounded-xl border-gray-200 bg-white focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none transition-all"
                         value={approvedBy}
                         onChange={(e) => setApprovedBy(e.target.value)}
                         placeholder="Approved By Name"
@@ -1443,7 +1305,7 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
                       <input
                         type="text"
                         disabled={!isEditMode}
-                        className="w-full text-[10px] p-1.5 border rounded-md border-gray-200"
+                        className="w-full text-[11px] font-semibold p-2 border rounded-xl border-gray-200 bg-white text-gray-600 focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none transition-all"
                         value={approvedByPosition}
                         onChange={(e) => setApprovedByPosition(e.target.value)}
                         placeholder="Approved By Position"
@@ -1473,20 +1335,10 @@ export default function CanvassSheetModule({ currentUser }: CanvassModuleProps) 
               </div>
                 </form>
               </div>
-
-              {/* Right Column: Live Document Preview */}
-              <div className="lg:col-span-6 h-[450px] lg:h-[70vh] sticky top-0">
-                <DocumentPreview
-                  moduleName="canvass"
-                  format="excel"
-                  data={currentCanvassData}
-                />
-              </div>
             </div>
           </div>
         </div>
       )}
-    </div>
     </div>
   );
 }

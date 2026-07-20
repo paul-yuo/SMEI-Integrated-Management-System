@@ -95,6 +95,10 @@ export interface PurchaseOrderDB {
   discountVatAmount: number;
   partsEwt1: number;
   laborEwt2: number;
+  ewtType?: string;
+  ewtPercentage?: number;
+  partsEwtPercentage?: number;
+  laborEwtPercentage?: number;
   totalAmount: number;
   
   // Terms
@@ -333,61 +337,6 @@ class Database {
         department: "Management",
         status: "Active",
         avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150"
-      },
-      {
-        id: "u2",
-        username: "staff",
-        passwordHash: hashPassword("staff123"),
-        fullName: "Maria Santos",
-        email: "maria.s@southcoastmetal.com",
-        role: "Purchasing Staff",
-        department: "Purchasing",
-        status: "Active",
-        avatarUrl: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150"
-      },
-      {
-        id: "u3",
-        username: "depthead",
-        passwordHash: hashPassword("depthead123"),
-        fullName: "Robert Chen",
-        email: "r.chen@southcoastmetal.com",
-        role: "Department Head",
-        department: "Production",
-        status: "Active",
-        avatarUrl: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150"
-      },
-      {
-        id: "u4",
-        username: "accounting",
-        passwordHash: hashPassword("accounting123"),
-        fullName: "Elena Lopez",
-        email: "elena.l@southcoastmetal.com",
-        role: "Accounting Staff",
-        department: "Accounting",
-        status: "Active",
-        avatarUrl: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150"
-      },
-      {
-        id: "u5",
-        username: "director",
-        passwordHash: hashPassword("director123"),
-        fullName: "William Sy",
-        email: "w.sy@southcoastmetal.com",
-        role: "Director",
-        department: "Management",
-        status: "Active",
-        avatarUrl: "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150"
-      },
-      {
-        id: "u6",
-        username: "viewer",
-        passwordHash: hashPassword("viewer123"),
-        fullName: "Grace Perez",
-        email: "g.perez@southcoastmetal.com",
-        role: "Viewer",
-        department: "Management",
-        status: "Active",
-        avatarUrl: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150"
       }
     ];
 
@@ -456,267 +405,16 @@ class Database {
     ];
 
     // Seed Purchase Orders
-    const purchase_orders: PurchaseOrderDB[] = [
-      {
-        id: "po1",
-        poNumber: "SMEI-2026-0001",
-        poDate: "2026-06-10",
-        deliveryDate: "2026-07-05",
-        supplierId: "s1",
-        supplierName: "Cavite Metal Casting Corp.",
-        attention: "Mr. Arthur Alcantara",
-        telNo: "+63-46-437-1234",
-        faxNo: "+63-46-437-5678",
-        purpose: "Fabrication of Main Support Girders for Assembly Line 3",
-        category: "Zero Rated",
-        items: [
-          { id: "i1", quantity: 5, unit: "pcs", description: "H-Beam Structural Steel 150x150mm x 6m", unitPrice: 12500, amount: 62500 },
-          { id: "i2", quantity: 20, unit: "pcs", description: "Reinforcement Steel Plate 12mm x 4ft x 8ft", unitPrice: 6800, amount: 136000 },
-          { id: "i3", quantity: 1, unit: "lot", description: "Labor for precision metal cutting & edge grinding", unitPrice: 25000, amount: 25000 }
-        ],
-        vatableAmount: 0,
-        vat12: 0,
-        vatExemptAmount: 0,
-        zeroRatedAmount: 223500,
-        grossAmount: 223500,
-        discountVatAmount: 0,
-        partsEwt1: 1985,
-        laborEwt2: 500,
-        totalAmount: 223500,
-        paymentTerms: "30 Days after complete delivery",
-        workDuration: "25 Days from NTP",
-        warranty: "1 Year against manufacturing defects",
-        remarks: "Deliveries must be coordinated with CEZ gate pass control.",
-        created_by: "u2",
-        created_department: "Purchasing",
-        department: "Production",
-        approved_by: "u3",
-        verified_by: "u4",
-        final_approved_by: "u5",
-        preparedBy: "Maria Santos",
-        checkedBy: "Robert Chen",
-        verifiedBy: "Elena Lopez",
-        approvedBy: "William Sy",
-        conforme: "Arthur Alcantara",
-        signature: "William Sy Signature",
-        dateApproved: "2026-06-15",
-        status: "Approved",
-        updatedAt: "2026-06-15T14:30:00-07:00"
-      },
-      {
-        id: "po2",
-        poNumber: "SMEI-2026-0002",
-        poDate: "2026-06-20",
-        deliveryDate: "2026-07-10",
-        supplierId: "s2",
-        supplierName: "Rosario Steel Works Inc.",
-        attention: "Ms. Sarah Jingco",
-        telNo: "+63-46-437-8899",
-        faxNo: "+63-46-437-8800",
-        purpose: "Raw materials for high-pressure hydraulic cylinders",
-        category: "Vatable",
-        items: [
-          { id: "i4", quantity: 10, unit: "pcs", description: "Seamless Steel Tube OD 120mm x ID 100mm x 3m", unitPrice: 8500, amount: 85000 },
-          { id: "i5", quantity: 15, unit: "pcs", description: "Chrome Plated Piston Rod 50mm dia x 2m", unitPrice: 5200, amount: 78000 }
-        ],
-        vatableAmount: 163000,
-        vat12: 19560,
-        vatExemptAmount: 0,
-        zeroRatedAmount: 0,
-        grossAmount: 163000,
-        discountVatAmount: 0,
-        partsEwt1: 1630,
-        laborEwt2: 0,
-        totalAmount: 182560,
-        paymentTerms: "COD with 2% discount",
-        workDuration: "10 Days",
-        warranty: "6 Months",
-        remarks: "Priority order for urgent production replacement.",
-        created_by: "u2",
-        created_department: "Purchasing",
-        department: "Production",
-        preparedBy: "Maria Santos",
-        status: "Pending Review",
-        updatedAt: "2026-06-20T10:15:00-07:00"
-      },
-      {
-        id: "po3",
-        poNumber: "SMEI-2026-0003",
-        poDate: "2026-06-24",
-        deliveryDate: "2026-07-20",
-        supplierId: "s3",
-        supplierName: "Fastener World Philippines",
-        attention: "Mr. Jose Rizal Jr.",
-        telNo: "+63-2-812-3456",
-        faxNo: "+63-2-812-3457",
-        purpose: "Standard warehouse fasteners replenishment",
-        category: "Vatable",
-        items: [
-          { id: "i6", quantity: 500, unit: "pcs", description: "Grade 8.8 Hex Bolt M12 x 50mm with Nut", unitPrice: 45, amount: 22500 },
-          { id: "i7", quantity: 1000, unit: "pcs", description: "Stainless Steel Washer M12", unitPrice: 8, amount: 8000 }
-        ],
-        vatableAmount: 30500,
-        vat12: 3660,
-        vatExemptAmount: 0,
-        zeroRatedAmount: 0,
-        grossAmount: 30500,
-        discountVatAmount: 0,
-        partsEwt1: 305,
-        laborEwt2: 0,
-        totalAmount: 34160,
-        paymentTerms: "Net 60 Days",
-        workDuration: "Immediate",
-        warranty: "None",
-        remarks: "For standard warehouse inventory storage.",
-        created_by: "u2",
-        created_department: "Purchasing",
-        department: "Warehouse",
-        preparedBy: "Maria Santos",
-        status: "Draft",
-        updatedAt: "2026-06-24T16:00:00-07:00"
-      },
-      {
-        id: "po4",
-        poNumber: "SMEI-2026-0004",
-        poDate: "2026-06-21",
-        deliveryDate: "2026-07-15",
-        supplierId: "s5",
-        supplierName: "Zenith Machinery & Calibration",
-        attention: "Engr. Paul Peralta",
-        telNo: "+63-46-501-1111",
-        faxNo: "+63-46-501-2222",
-        purpose: "Preventative overhaul maintenance on Lathe Machine C12",
-        category: "VAT Exempt",
-        items: [
-          { id: "i8", quantity: 1, unit: "lot", description: "Annual calibration & dynamic alignment services", unitPrice: 35000, amount: 35000 },
-          { id: "i9", quantity: 1, unit: "lot", description: "Labor for transmission gear overhaul & bearing seals replacement", unitPrice: 45000, amount: 45000 }
-        ],
-        vatableAmount: 0,
-        vat12: 0,
-        vatExemptAmount: 80000,
-        zeroRatedAmount: 0,
-        grossAmount: 80000,
-        discountVatAmount: 0,
-        partsEwt1: 0,
-        laborEwt2: 1600,
-        totalAmount: 80000,
-        paymentTerms: "50% Downpayment, 50% upon completion",
-        workDuration: "5 Working Days",
-        warranty: "3 Months on service and replaced parts",
-        remarks: "Work must be scheduled over the weekend to minimize plant downtime.",
-        created_by: "u2",
-        created_department: "Purchasing",
-        department: "Production",
-        approved_by: "u3",
-        verified_by: "u4",
-        preparedBy: "Maria Santos",
-        checkedBy: "Robert Chen",
-        verifiedBy: "Elena Lopez",
-        status: "Pending Approval",
-        updatedAt: "2026-06-22T09:00:00-07:00"
-      }
-    ];
+    const purchase_orders: PurchaseOrderDB[] = [];
 
     // Seed Approvals History
-    const approvals: ApprovalLogDB[] = [
-      {
-        id: "app1",
-        poId: "po1",
-        userId: "u2",
-        fullName: "Maria Santos",
-        role: "Purchasing Staff",
-        action: "Submit",
-        timestamp: "2026-06-10T10:35:00Z"
-      },
-      {
-        id: "app2",
-        poId: "po1",
-        userId: "u3",
-        fullName: "Robert Chen",
-        role: "Department Head",
-        action: "Approve",
-        remarks: "Main support girders checked, specs compliant.",
-        timestamp: "2026-06-12T14:15:00Z"
-      },
-      {
-        id: "app3",
-        poId: "po1",
-        userId: "u4",
-        fullName: "Elena Lopez",
-        role: "Accounting Staff",
-        action: "Verify",
-        remarks: "Zero rated VAT verified (PEZA Supplier).",
-        timestamp: "2026-06-14T11:05:00Z"
-      },
-      {
-        id: "app4",
-        poId: "po1",
-        userId: "u5",
-        fullName: "William Sy",
-        role: "Director",
-        action: "Final Approve",
-        remarks: "Approved for fabrication.",
-        timestamp: "2026-06-15T14:30:00Z"
-      }
-    ];
+    const approvals: ApprovalLogDB[] = [];
 
     // Seed Notifications
-    const notifications: NotificationDB[] = [
-      {
-        id: "n1",
-        userId: "u3",
-        role: "Department Head",
-        title: "New Purchase Order for Review",
-        message: "PO SMEI-2026-0002 has been submitted by Maria Santos and is awaiting your review.",
-        date: "2026-06-20",
-        time: "10:20 AM",
-        isRead: false,
-        poId: "po2"
-      },
-      {
-        id: "n2",
-        userId: "u5",
-        role: "Director",
-        title: "PO Awaiting Final Authorization",
-        message: "PO SMEI-2026-0004 has been verified by Accounting and is ready for your approval.",
-        date: "2026-06-22",
-        time: "09:05 AM",
-        isRead: false,
-        poId: "po4"
-      }
-    ];
+    const notifications: NotificationDB[] = [];
 
     // Seed Audit Logs
-    const audit_logs: AuditLogDB[] = [
-      {
-        id: "log1",
-        user_id: "u2",
-        username: "staff",
-        role: "Purchasing Staff",
-        action: "Create PO Draft",
-        module: "Purchase Orders",
-        record_id: "po1",
-        old_value: "-",
-        new_value: "SMEI-2026-0001 (Draft)",
-        ip_address: "192.168.12.45",
-        browser: "Chrome 124.0.0",
-        timestamp: "2026-06-10T10:30:00Z"
-      },
-      {
-        id: "log2",
-        user_id: "u3",
-        username: "depthead",
-        role: "Department Head",
-        action: "Approve PO",
-        module: "Purchase Orders",
-        record_id: "po1",
-        old_value: "Submitted",
-        new_value: "Department Approved",
-        ip_address: "192.168.12.48",
-        browser: "Chrome 124.0.0",
-        timestamp: "2026-06-12T14:15:00Z"
-      }
-    ];
+    const audit_logs: AuditLogDB[] = [];
 
     this.data = {
       users,

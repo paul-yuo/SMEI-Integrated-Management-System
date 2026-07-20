@@ -1,6 +1,8 @@
 {
-  "name": "SMEI Purchase Order Management System",
+  "name": "Remix: SMEI Purchase Order Management System",
   "description": "Purchase Order Management System (POMS) for Southcoast Metal Enterprise, Inc. managing purchase requests, orders, supplier information, and approvals.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

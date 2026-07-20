@@ -4,8 +4,7 @@ import { api } from "../lib/api";
 import { Search, Filter, Edit3, Eye, X, FileSpreadsheet, FileText } from "lucide-react";
 import { TableSkeleton } from "./ui/Skeleton";
 import { exportWordWithTemplate, exportExcelWithTemplate } from "../utils/templateExport";
-import { ExportExcelButton } from "./SharedButtons";
-import DocumentPreview from "./DocumentPreview";
+import { ExportExcelButton, ExportPdfButton } from "./SharedButtons";
 import { formatRFSNo } from "../utils/templateMapping";
 
 interface RfsApprovalModuleProps {
@@ -34,8 +33,13 @@ export default function RfsApprovalModule({ currentUser }: RfsApprovalModuleProp
     try {
       const data = await api.getRFS();
       setRequests(data);
-    } catch (error) {
-      console.error("Error fetching RFS:", error);
+    } catch (err: any) {
+      const errMsg = err?.message || String(err);
+      if (errMsg.includes("Session expired") || errMsg.includes("unauthorized") || errMsg.includes("token")) {
+        console.warn("RFS Approval fetch unauthorized or session expired (handled globally):", errMsg);
+      } else {
+        console.error("Error fetching RFS:", errMsg);
+      }
     } finally {
       setLoading(false);
     }
@@ -100,6 +104,37 @@ export default function RfsApprovalModule({ currentUser }: RfsApprovalModuleProp
     
     setError("");
     setIsSaving(true);
+
+    let requiredPin = "5678";
+    let isPinRequired = false;
+    try {
+      const savedSetting = localStorage.getItem("smei_security_config");
+      const globalEnabled = savedSetting === null ? false : JSON.parse(savedSetting).enabled;
+
+      if (globalEnabled) {
+        const saved = localStorage.getItem("smei_module_pins");
+        if (saved) {
+          const rules = JSON.parse(saved);
+          const rule = rules.find((r: any) => r.id === "rfs_approval");
+          if (rule) {
+            requiredPin = rule.pinCode;
+            isPinRequired = rule.isEnabled;
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error("Failed to parse module pin configuration", err);
+    }
+
+    if (isPinRequired) {
+      const pin = prompt("Admin PIN code required to update RFS Approval details:");
+      if (pin !== requiredPin) {
+        setError("Invalid PIN. Access denied.");
+        setIsSaving(false);
+        return;
+      }
+    }
+
     try {
       await api.updateRFS(selectedRFS.id, {
         dueDate,
@@ -148,9 +183,9 @@ export default function RfsApprovalModule({ currentUser }: RfsApprovalModuleProp
       }));
 
       if (format === "word") {
-        await exportWordWithTemplate("RFS_TEMPLATE.docx", { ...exportData, items: exportItems }, `${formattedRFS}_SMEI_RFS.docx`);
+        await exportWordWithTemplate("RFS_TEMPLATE_WORD.docx", { ...exportData, items: exportItems }, `${formattedRFS}_SMEI_RFS.docx`);
       } else {
-        await exportExcelWithTemplate("RFS_TEMPLATE.xlsx", exportData, "items", exportItems, `${formattedRFS}_SMEI_RFS.xlsx`);
+        await exportExcelWithTemplate("RFS_TEMPLATE.xlsm", exportData, "items", exportItems, `${formattedRFS}_SMEI_RFS.xlsm`);
       }
     } catch (err: any) {
       console.error("Export error:", err);
@@ -172,6 +207,19 @@ export default function RfsApprovalModule({ currentUser }: RfsApprovalModuleProp
     Irregular: "bg-amber-50 text-amber-700 border-amber-200"
   };
 
+  const handleTriggerPDFExport = async () => {
+    if (selectedRFS) {
+      try {
+        const { printDocument } = await import("../utils/printDocument");
+        await printDocument("rfs", selectedRFS);
+      } catch (err: any) {
+        alert("Failed to print: " + (err.message || err));
+      }
+    } else {
+      alert("Please select an RFS first.");
+    }
+  };
+
   return (
     <div className="p-6 md:p-10 space-y-6 max-w-7xl mx-auto overflow-x-hidden">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -186,15 +234,28 @@ export default function RfsApprovalModule({ currentUser }: RfsApprovalModuleProp
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         {/* Excel Export Action Bar */}
         <div className="p-4 border-b border-gray-100 bg-gray-50/30 flex flex-col sm:flex-row gap-3 justify-between items-center">
-          <ExportExcelButton
-            onClick={() => {
-              if (selectedRFS) {
-                handleExport(selectedRFS, "excel");
-              }
-            }}
-            disabled={!selectedRFS}
-            selectedText={selectedRFS ? formatRFSNo(selectedRFS.rfsNumber, selectedRFS.dateRequested) : ""}
-          />
+          {selectedRFS && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-gray-500 uppercase font-mono tracking-wider">Selected:</span>
+              <span className="text-[11px] font-bold font-mono text-smei-crimson bg-red-50 border border-red-200 px-2.5 py-1 rounded-md">
+                {formatRFSNo(selectedRFS.rfsNumber, selectedRFS.dateRequested)}
+              </span>
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
+            <ExportExcelButton
+              onClick={() => {
+                if (selectedRFS) {
+                  handleExport(selectedRFS, "excel");
+                }
+              }}
+              disabled={!selectedRFS}
+            />
+            <ExportPdfButton
+              onClick={handleTriggerPDFExport}
+              disabled={!selectedRFS}
+            />
+          </div>
         </div>
 
         {/* Filters */}
@@ -228,10 +289,10 @@ export default function RfsApprovalModule({ currentUser }: RfsApprovalModuleProp
           </div>
         </div>
 
-        {/* Split Layout for RFS Grid and Live Preview */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start p-6">
-          {/* Left Column: Table */}
-          <div className="lg:col-span-5 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[calc(100vh-280px)] min-h-[500px]">
+        {/* RFS Grid Layout */}
+        <div className="p-6">
+          {/* Table */}
+          <div className="w-full bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[calc(100vh-280px)] min-h-[500px]">
             <div className="overflow-x-auto flex-1 overflow-y-auto">
               <table className="w-full text-left border-collapse min-w-[500px]">
                 <thead className="sticky top-0 bg-white z-10 shadow-sm">
@@ -297,7 +358,7 @@ export default function RfsApprovalModule({ currentUser }: RfsApprovalModuleProp
                         <td className="py-3 px-6 text-center" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-center gap-1.5">
                             <button
-                              onClick={() => handleOpenModal(req)}
+                               onClick={() => handleOpenModal(req)}
                               className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-transparent hover:border-blue-100"
                               title="Update Status & Due Date"
                             >
@@ -318,22 +379,6 @@ export default function RfsApprovalModule({ currentUser }: RfsApprovalModuleProp
                 </tbody>
               </table>
             </div>
-          </div>
-
-          {/* Right Column: Live Document Preview */}
-          <div className="lg:col-span-7 h-[calc(100vh-280px)] min-h-[500px] sticky top-6">
-            {selectedRFS ? (
-              <DocumentPreview
-                moduleName="rfs"
-                format="excel"
-                data={selectedRFS}
-              />
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full bg-slate-50 border border-slate-200 border-dashed rounded-xl p-8 text-slate-400">
-                <FileText className="w-12 h-12 text-slate-300 mb-2 animate-pulse" />
-                <p className="text-sm font-medium">Select an RFS document to display live preview</p>
-              </div>
-            )}
           </div>
         </div>
 
@@ -366,7 +411,7 @@ export default function RfsApprovalModule({ currentUser }: RfsApprovalModuleProp
       {/* Edit Modal */}
       {isModalOpen && selectedRFS && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-7xl border border-gray-100 flex flex-col overflow-hidden animate-scaleIn">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl border border-gray-100 flex flex-col overflow-hidden animate-scaleIn">
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gradient-to-r from-red-700 to-red-600 text-white">
               <h3 className="font-bold tracking-wide flex items-center gap-2 text-sm">
                 <Edit3 className="w-4 h-4" /> RFS Approval (Control No: {formatRFSNo(selectedRFS.rfsNumber, selectedRFS.dateRequested)})
@@ -379,9 +424,9 @@ export default function RfsApprovalModule({ currentUser }: RfsApprovalModuleProp
               </button>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 max-h-[80vh] overflow-y-auto">
-              {/* Left Column: Form Editor */}
-              <div className="lg:col-span-6">
+            <div className="p-6 max-h-[80vh] overflow-y-auto">
+              {/* Form Editor */}
+              <div className="w-full">
                 <form onSubmit={handleSave} className="space-y-4">
                   {error && (
                     <div className="bg-red-50 border border-red-200 text-red-700 text-xs px-3 py-2 rounded-lg">
@@ -439,17 +484,6 @@ export default function RfsApprovalModule({ currentUser }: RfsApprovalModuleProp
                     </button>
                   </div>
                 </form>
-              </div>
-
-              {/* Right Column: Live Document Preview */}
-              <div className="lg:col-span-6 h-[450px] lg:h-[70vh] sticky top-0">
-                {currentRFSData && (
-                  <DocumentPreview
-                    moduleName="rfs"
-                    format="excel"
-                    data={currentRFSData}
-                  />
-                )}
               </div>
             </div>
           </div>

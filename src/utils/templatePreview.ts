@@ -1,11 +1,53 @@
 import PizZip from "pizzip";
 import Docxtemplater from "docxtemplater";
+// @ts-ignore
+import ImageModule from "docxtemplater-image-module-free";
 import ExcelJS from "exceljs";
 import * as XLSX from "xlsx";
 
-// Merge split placeholders like {{PART1</w:t>...<w:t>PART2}} in Word XML
+function base64Parser(dataUrl: string) {
+  if (typeof dataUrl !== "string") return dataUrl;
+  const regex = /^data:.+;base64,/;
+  if (regex.test(dataUrl)) {
+    const base64 = dataUrl.replace(regex, "");
+    const binaryString = window.atob(base64);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes.buffer;
+  }
+  return dataUrl;
+}
+
+// Merge split placeholders like {{PART1</w:t>...<w:t>PART2}} in Word XML safely and robustly
 function cleanSplitPlaceholders(xml: string): string {
   let cleaned = xml.replace(/<w:proofErr\b[^>]*\/>/g, "");
+  
+  // Step 1: Merge split start and end brace characters separated by run/text boundaries
+  cleaned = cleaned.replace(/\{<\/w:t>(?:<[^>]+>|\s)*?<w:t\b[^>]*>\{/g, "{{");
+  cleaned = cleaned.replace(/\}<\/w:t>(?:<[^>]+>|\s)*?<w:t\b[^>]*>\}/g, "}}");
+  
+  // Also merge split double parentheses
+  cleaned = cleaned.replace(/\(<\/w:t>(?:<[^>]+>|\s)*?<w:t\b[^>]*>\(/g, "((");
+  cleaned = cleaned.replace(/\)<\/w:t>(?:<[^>]+>|\s)*?<w:t\b[^>]*>\)/g, "))");
+  
+  // Step 2: Strip any intervening run/text boundaries inside curly braces/parentheses
+  cleaned = cleaned.replace(/\{\{((?:(?!\{\{)[\s\S])*?)\}\}/g, (match, p1) => {
+    const stripped = p1.replace(/<\/w:t>[\s\S]*?<w:t\b[^>]*>/g, "");
+    return `{{${stripped}}}`;
+  });
+  cleaned = cleaned.replace(/\(\(((?:(?!\(\()[\s\S])*?)\)\)/g, (match, p1) => {
+    const stripped = p1.replace(/<\/w:t>[\s\S]*?<w:t\b[^>]*>/g, "");
+    return `((${stripped}))`;
+  });
+  cleaned = cleaned.replace(/\(\(((?:(?!\(\()[\s\S])*?)\}\}/g, (match, p1) => {
+    const stripped = p1.replace(/<\/w:t>[\s\S]*?<w:t\b[^>]*>/g, "");
+    return `{{${stripped}}}`;
+  });
+
+  // Step 3: Backward-compatibility check using splitRegex
   const splitRegex = /(\{\{[^}]+?)<\/w:t><\/w:r>(?:<w:proofErr\b[^>]*\/>)?<w:r\b[^>]*>(?:<w:rPr>[^]*?<\/w:rPr>)?<w:t\b[^>]*>([^}]*?\}\})/g;
   let prevCleaned;
   do {
@@ -13,6 +55,27 @@ function cleanSplitPlaceholders(xml: string): string {
     cleaned = cleaned.replace(splitRegex, "$1$2");
   } while (cleaned !== prevCleaned);
   return cleaned;
+}
+
+// Recursively sanitizes all values in a data object so that undefined, null, or NaN values are replaced with empty strings ("").
+export function sanitizeRenderData(val: any): any {
+  if (val === undefined || val === null) {
+    return "";
+  }
+  if (typeof val === "number" && isNaN(val)) {
+    return "";
+  }
+  if (Array.isArray(val)) {
+    return val.map(sanitizeRenderData);
+  }
+  if (typeof val === "object" && !(val instanceof Date)) {
+    const cleaned: Record<string, any> = {};
+    for (const key of Object.keys(val)) {
+      cleaned[key] = sanitizeRenderData(val[key]);
+    }
+    return cleaned;
+  }
+  return val;
 }
 
 // Resolve ExcelJS shared formulas
@@ -135,54 +198,393 @@ export async function generateDocxBlob(
   templateName: string,
   data: Record<string, any>
 ): Promise<{ blob: Blob; warnings: string[] }> {
-  const fetchUrl = templateName === "PO_TEMPLATE.docx"
-    ? `/templates/PO_TEMPLATE.docx?t=${Date.now()}`
-    : `/templates/${templateName}`;
+  const templatePath = `/templates/${templateName}`;
+  console.log(`[Runtime Template Load] Loading DOCX template from path: ${templatePath}`);
+  const fetchUrl = `${templatePath}?t=${Date.now()}`;
 
-  let response = await fetch(fetchUrl);
-  if (!response.ok) {
-    const fallbackUrl = templateName === "PO_TEMPLATE.docx"
-      ? `/PO_TEMPLATE.docx?t=${Date.now()}`
-      : `/${templateName}`;
-    response = await fetch(fallbackUrl);
-  }
+  const response = await fetch(fetchUrl, { cache: "no-store" });
+  const contentType = response.headers.get("content-type") || "";
 
-  if (!response.ok) {
-    throw new Error(`Unable to load template '${templateName}'. Please verify public/templates/ directory.`);
+  if (!response.ok || contentType.includes("text/html")) {
+    throw new Error(`Unable to load template directly from '${templatePath}'. Server returned error or HTML fallback instead of binary. Please verify public/templates/ directory.`);
   }
 
   const arrayBuffer = await response.arrayBuffer();
+  // Check magic bytes PK to prevent cryptic PizZip errors
+  const bytes = new Uint8Array(arrayBuffer.slice(0, 4));
+  if (bytes[0] !== 0x50 || bytes[1] !== 0x4B) {
+    throw new Error(`Invalid file format for template '${templateName}'. Expected a valid Office/ZIP document but received invalid binary.`);
+  }
+
   const zip = new PizZip(arrayBuffer);
 
   // Apply XML level corrections
   if (templateName === "CANVASS_TEMPLATE.docx") {
     let docXml = zip.files["word/document.xml"].asText();
-    docXml = docXml.replace(/<w:t>\{<\/w:t>[\s\S]*?<w:t>\{<\/w:t>([\s\S]*?<w:t>Category<\/w:t>)/, "<w:t>{{</w:t>$1");
-    docXml = docXml.replace(/<w:t>\{<\/w:t>[\s\S]*?<w:t>\{<\/w:t>([\s\S]*?<w:t>Plate_No<\/w:t>)/, "<w:t>{{</w:t>$1");
-    docXml = docXml.replace(/\(\(contact_no/g, "{{contact_no");
+    docXml = cleanSplitPlaceholders(docXml);
+    docXml = docXml.replace(/\(\(/g, "{{").replace(/\)\)/g, "}}");
+
+    // Detect number of suppliers from data with robust enterprise validation
+    let numSuppliers = 0;
+    while (true) {
+      const val = data[`shop_name${numSuppliers + 1}`];
+      if (val !== undefined && val !== null && typeof val === "string" && val.trim() !== "") {
+        numSuppliers++;
+      } else {
+        break;
+      }
+    }
+    // Fallback: if no valid suppliers are found, default to 1 to avoid division by zero or empty grid
+    if (numSuppliers === 0) {
+      numSuppliers = 1;
+    }
+
+    // Perform XML-level cloning and width scaling for 1 to N suppliers
+    if (numSuppliers > 0) {
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(docXml, "application/xml");
+      const serializer = new XMLSerializer();
+
+      const getElements = (parent: Element | Document, tagName: string): Element[] => {
+        const ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+        const listNS = parent.getElementsByTagNameNS(ns, tagName);
+        if (listNS && listNS.length > 0) {
+          return Array.from(listNS);
+        }
+        const listPrefixed = parent.getElementsByTagName(`w:${tagName}`);
+        return Array.from(listPrefixed);
+      };
+
+      const tables = getElements(xmlDoc, "tbl");
+      const targetTable = tables.find(table => {
+        const tableXml = serializer.serializeToString(table);
+        return tableXml.includes("shop_name1");
+      });
+
+      if (targetTable) {
+        const ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+
+        // 1. Dynamically update the table grid (tblGrid) to align cell counts and column widths
+        const tblGridList = getElements(targetTable, "tblGrid");
+        if (tblGridList.length > 0) {
+          const tblGrid = tblGridList[0];
+          while (tblGrid.firstChild) {
+            tblGrid.removeChild(tblGrid.firstChild);
+          }
+
+          // First column (Label)
+          const col0 = xmlDoc.createElementNS(ns, "w:gridCol");
+          col0.setAttribute("w:w", "2830");
+          tblGrid.appendChild(col0);
+
+          // Supplier columns
+          const supplierWidth = Math.round(5660 / numSuppliers);
+          for (let i = 0; i < numSuppliers; i++) {
+            const colS = xmlDoc.createElementNS(ns, "w:gridCol");
+            colS.setAttribute("w:w", String(supplierWidth));
+            tblGrid.appendChild(colS);
+          }
+
+          // Last column (Remarks)
+          const colR = xmlDoc.createElementNS(ns, "w:gridCol");
+          colR.setAttribute("w:w", "2830");
+          tblGrid.appendChild(colR);
+        }
+
+        // 2. Process all rows of targetTable to dynamically clone the supplier cell
+        const tableRows = getElements(targetTable, "tr");
+        tableRows.forEach((row) => {
+          const tcElements = getElements(row, "tc");
+
+          // Remove any cell that contains suffix 2 or 3 to avoid duplicates and ensure dynamic columns
+          tcElements.forEach((tc) => {
+            const tcXml = serializer.serializeToString(tc);
+            const containsOtherSupplier = 
+              tcXml.includes("shop_name2") || tcXml.includes("shop_name3") ||
+              tcXml.includes("contact_person2") || tcXml.includes("contact_person3") ||
+              tcXml.includes("contact_no2") || tcXml.includes("contact_no3") ||
+              tcXml.includes("work_duration2") || tcXml.includes("work_duration3") ||
+              tcXml.includes("warranty2") || tcXml.includes("warranty3") ||
+              tcXml.includes("payment_terms2") || tcXml.includes("payment_terms3") ||
+              tcXml.includes("parts_shop2_price2") || tcXml.includes("parts_shop3_price3") ||
+              tcXml.includes("total_shop2") || tcXml.includes("total_shop3") ||
+              tcXml.includes("vat2") || tcXml.includes("vat3") ||
+              tcXml.includes("total_amount2") || tcXml.includes("total_amount3");
+
+            if (containsOtherSupplier) {
+              tc.parentNode?.removeChild(tc);
+            }
+          });
+
+          // Get the remaining cells after removal
+          const updatedTcElements = getElements(row, "tc");
+          if (updatedTcElements.length > 0) {
+            // 1. Label cell (always index 0)
+            const labelCell = updatedTcElements[0];
+            if (labelCell) {
+              const tcWList = getElements(labelCell, "tcW");
+              if (tcWList.length > 0) {
+                tcWList[0].setAttribute("w:w", "2830");
+                tcWList[0].setAttribute("w:type", "dxa");
+              }
+            }
+
+            // 2. Remarks cell (always the last column, index N+1)
+            let remarksCell: Element;
+            if (updatedTcElements.length >= 3) {
+              remarksCell = updatedTcElements[updatedTcElements.length - 1];
+            } else {
+              // Remarks cell is missing, create one by cloning labelCell
+              remarksCell = labelCell.cloneNode(true) as Element;
+              // Clear text content
+              const tList = getElements(remarksCell, "t");
+              tList.forEach(t => { t.textContent = ""; });
+              row.appendChild(remarksCell);
+            }
+            // Set Remarks cell width to 2830
+            const remarksWList = getElements(remarksCell, "tcW");
+            if (remarksWList.length > 0) {
+              remarksWList[0].setAttribute("w:w", "2830");
+              remarksWList[0].setAttribute("w:type", "dxa");
+            }
+
+            // 3. Supplier cell (always index 1 originally)
+            let supplierCell: Element;
+            if (updatedTcElements.length >= 2) {
+              supplierCell = updatedTcElements[1];
+            } else {
+              // Supplier cell is missing, create one by cloning labelCell
+              supplierCell = labelCell.cloneNode(true) as Element;
+              const tList = getElements(supplierCell, "t");
+              tList.forEach(t => { t.textContent = ""; });
+              // Insert before remarksCell
+              row.insertBefore(supplierCell, remarksCell);
+            }
+
+            // Set Supplier 1 cell width (standard total supplier width is ~5660 dxa)
+            const supplierWidth = Math.round(5660 / numSuppliers);
+            const supWList = getElements(supplierCell, "tcW");
+            if (supWList.length > 0) {
+              supWList[0].setAttribute("w:w", String(supplierWidth));
+              supWList[0].setAttribute("w:type", "dxa");
+            }
+
+            // 4. Clone for other suppliers
+            for (let i = 2; i <= numSuppliers; i++) {
+              const clonedCell = supplierCell.cloneNode(true) as Element;
+              
+              // Adjust width of cloned cell
+              const clonedWList = getElements(clonedCell, "tcW");
+              if (clonedWList.length > 0) {
+                clonedWList[0].setAttribute("w:w", String(supplierWidth));
+                clonedWList[0].setAttribute("w:type", "dxa");
+              }
+
+              // Recursively find and modify all text nodes in <w:t> elements
+              const tElements = getElements(clonedCell, "t");
+              tElements.forEach((tElem) => {
+                if (tElem.textContent) {
+                  let txt = tElem.textContent;
+                  
+                  // Replace supplier fields with safe negative-lookahead replacements
+                  txt = txt.replace(/contact_no1/g, `contact_no${i}`);
+                  txt = txt.replace(/shop_name1/g, `shop_name${i}`);
+                  txt = txt.replace(/contact_person1/g, `contact_person${i}`);
+                  txt = txt.replace(/work_duration1/g, `work_duration${i}`);
+                  txt = txt.replace(/warranty1/g, `warranty${i}`);
+                  txt = txt.replace(/payment_terms1/g, `payment_terms${i}`);
+                  txt = txt.replace(/parts_shop1_price1/g, `parts_shop${i}_price${i}`);
+                  txt = txt.replace(/total_shop1/g, `total_shop${i}`);
+                  txt = txt.replace(/vat1/g, `vat${i}`);
+                  txt = txt.replace(/total_amount1/g, `total_amount${i}`);
+                  
+                  // Safely replace "contact_no" only when not followed by a digit (avoiding contact_no22)
+                  txt = txt.replace(/contact_no(?!\d)/g, `contact_no${i}`);
+                  
+                  tElem.textContent = txt;
+                }
+              });
+
+              // Insert cloned cell exactly before remarksCell
+              row.insertBefore(clonedCell, remarksCell);
+            }
+          }
+        });
+
+        // 3. Dynamically clone the items row for each part inside partsList
+        const updatedRows = getElements(targetTable, "tr");
+        const itemsRow = updatedRows.find((row) => {
+          const rowXml = serializer.serializeToString(row);
+          return rowXml.includes("parts1") || rowXml.includes("parts_shop1_price1");
+        });
+
+        const partsList = data.partsList;
+        if (itemsRow && Array.isArray(partsList) && partsList.length > 0) {
+          const parentTable = itemsRow.parentNode;
+          if (parentTable) {
+            partsList.forEach((part, partIdx) => {
+              const clonedRow = itemsRow.cloneNode(true) as Element;
+              const tElements = getElements(clonedRow, "t");
+              tElements.forEach((tElem) => {
+                if (tElem.textContent) {
+                  let txt = tElem.textContent;
+                  if (txt.includes("parts1")) {
+                    txt = txt.replace(/parts1/g, `part_desc_${partIdx}`);
+                  }
+                  for (let i = 1; i <= numSuppliers; i++) {
+                    const pricePlaceholder = `parts_shop${i}_price${i}`;
+                    if (txt.includes(pricePlaceholder)) {
+                      txt = txt.replace(new RegExp(pricePlaceholder, "g"), `part_price_${i}_${partIdx}`);
+                    }
+                  }
+                  tElem.textContent = txt;
+                }
+              });
+              parentTable.insertBefore(clonedRow, itemsRow);
+            });
+            parentTable.removeChild(itemsRow);
+          }
+        }
+      }
+
+      docXml = serializer.serializeToString(xmlDoc);
+    }
+
     docXml = docXml.replace(/\{\{([^{}]*?)\}\}/g, (match) => {
       return match.replace(/<[^>]+>/g, "").replace(/\s+/g, "");
     });
     zip.file("word/document.xml", docXml);
-  } else if (templateName === "PO_TEMPLATE.docx") {
+  } else {
     let docXml = zip.files["word/document.xml"].asText();
     docXml = cleanSplitPlaceholders(docXml);
+    if (templateName === "TIMESTAMP_TEMPLATE.docx") {
+      docXml = docXml.replace(/timestamp_photo/g, "%timestamp_photo");
+    }
+    if (templateName === "PIS_TEMPLATE_WORD.docx") {
+      const hasGross = !!data.HAS_GROSS;
+      const hasEwt = !!data.HAS_EWT;
+      const hasTotal = !!data.HAS_TOTAL;
+
+      const grossIdx = docXml.indexOf("<w:t>GROSS</w:t>");
+      if (grossIdx !== -1) {
+        let firstTrStart = -1;
+        let idx = docXml.lastIndexOf("<w:tr", grossIdx);
+        while (idx !== -1) {
+          const nextChar = docXml[idx + 5];
+          if (nextChar === " " || nextChar === ">") {
+            firstTrStart = idx;
+            break;
+          }
+          idx = docXml.lastIndexOf("<w:tr", idx - 1);
+        }
+        const totalPlaceholderIdx = docXml.indexOf("{{TOTAL}", grossIdx);
+        if (firstTrStart !== -1 && totalPlaceholderIdx !== -1) {
+          const secondTrEnd = docXml.indexOf("</w:tr>", totalPlaceholderIdx);
+          if (secondTrEnd !== -1) {
+            const originalRowsXml = docXml.substring(firstTrStart, secondTrEnd + "</w:tr>".length);
+            
+            let replacementRows = "";
+            const activeLabels: string[] = [];
+            const activeValues: string[] = [];
+
+            const grossLabelRun = `<w:r><w:rPr><w:b/><w:color w:val="0000FF"/><w:spacing w:val="-2"/><w:position w:val="1"/><w:sz w:val="20"/></w:rPr><w:t>GROSS</w:t></w:r>`;
+            const ewtLabelRun = `<w:r><w:rPr><w:b/><w:color w:val="0000FF"/></w:rPr><w:t>EWT</w:t></w:r><w:r><w:rPr><w:b/><w:color w:val="0000FF"/><w:spacing w:val="-1"/></w:rPr><w:t xml:space="preserve"> </w:t></w:r><w:r><w:rPr><w:b/><w:color w:val="0000FF"/><w:spacing w:val="-4"/></w:rPr><w:t>(${data.EWT_PERCENTAGE || "1%"})</w:t></w:r>`;
+            const totalLabelRun = `<w:r><w:rPr><w:b/><w:color w:val="0000FF"/><w:spacing w:val="-2"/></w:rPr><w:t>TOTAL</w:t></w:r>`;
+
+            const grossValueRun = `<w:r><w:rPr><w:color w:val="0000FF"/><w:spacing w:val="-2"/><w:sz w:val="20"/></w:rPr><w:t>{{GROSS}}</w:t></w:r>`;
+            const ewtValueRun = `<w:r><w:rPr><w:color w:val="0000FF"/><w:spacing w:val="-2"/><w:sz w:val="20"/></w:rPr><w:t>{{EWT}}</w:t></w:r>`;
+            const totalValueRun = `<w:r><w:rPr><w:color w:val="0000FF"/><w:spacing w:val="-2"/><w:sz w:val="20"/></w:rPr><w:t>{{TOTAL}}</w:t></w:r>`;
+
+            const tabRun = `<w:r><w:rPr><w:color w:val="0000FF"/></w:rPr><w:tab/></w:r>`;
+
+            if (hasGross) {
+              activeLabels.push(grossLabelRun);
+              activeValues.push(grossValueRun);
+            }
+            if (hasEwt) {
+              activeLabels.push(ewtLabelRun);
+              activeValues.push(ewtValueRun);
+            }
+            if (hasTotal) {
+              activeLabels.push(totalLabelRun);
+              activeValues.push(totalValueRun);
+            }
+
+            if (activeLabels.length > 0) {
+              const labelsBody = activeLabels.join(tabRun);
+              const valuesBody = activeValues.join(tabRun);
+
+              let tabsXml1 = "";
+              let tabsXml2 = "";
+
+              if (activeLabels.length === 3) {
+                tabsXml1 = `<w:tabs><w:tab w:val="left" w:pos="1860"/><w:tab w:val="left" w:pos="3941"/></w:tabs>`;
+                tabsXml2 = `<w:tabs><w:tab w:val="left" w:pos="1951"/><w:tab w:val="left" w:pos="3836"/></w:tabs>`;
+              } else if (activeLabels.length === 2) {
+                tabsXml1 = `<w:tabs><w:tab w:val="left" w:pos="2800"/></w:tabs>`;
+                tabsXml2 = `<w:tabs><w:tab w:val="left" w:pos="2800"/></w:tabs>`;
+              }
+
+              const row1Start = `<w:tr w:rsidR="00B0063D"><w:trPr><w:trHeight w:val="270"/></w:trPr><w:tc><w:tcPr><w:tcW w:w="11013" w:type="dxa"/><w:tcBorders><w:top w:val="single" w:sz="8" w:space="0" w:color="000000"/><w:bottom w:val="single" w:sz="8" w:space="0" w:color="000000"/></w:tcBorders></w:tcPr><w:p><w:pPr><w:pStyle w:val="TableParagraph"/>` + tabsXml1 + `<w:spacing w:line="250" w:lineRule="exact"/><w:ind w:right="181"/><w:jc w:val="right"/><w:rPr><w:b/></w:rPr></w:pPr>`;
+              const row2Start = `<w:tr w:rsidR="00B0063D"><w:trPr><w:trHeight w:val="270"/></w:trPr><w:tc><w:tcPr><w:tcW w:w="11013" w:type="dxa"/><w:tcBorders><w:top w:val="single" w:sz="8" w:space="0" w:color="000000"/><w:bottom w:val="single" w:sz="8" w:space="0" w:color="000000"/></w:tcBorders></w:tcPr><w:p><w:pPr><w:pStyle w:val="TableParagraph"/>` + tabsXml2 + `<w:spacing w:before="12" w:line="238" w:lineRule="exact"/><w:ind w:right="65"/><w:jc w:val="right"/><w:rPr><w:sz w:val="20"/></w:rPr></w:pPr>`;
+
+              const row1Xml = row1Start + labelsBody + `</w:p></w:tc></w:tr>`;
+              const row2Xml = row2Start + valuesBody + `</w:p></w:tc></w:tr>`;
+
+              replacementRows = row1Xml + row2Xml;
+            }
+
+            docXml = docXml.replace(originalRowsXml, replacementRows);
+          }
+        }
+      }
+    }
     zip.file("word/document.xml", docXml);
   }
 
   // extract template placeholders
   const templatePlaceholders = extractDocxPlaceholders(zip);
-  const items = data.items || [];
-  const warnings = validatePlaceholders(templatePlaceholders, data, items);
+  const sanitizedData = sanitizeRenderData(data);
+  const items = sanitizedData.items || [];
+  const warnings = validatePlaceholders(templatePlaceholders, sanitizedData, items);
+
+  const modules: any[] = [];
+  const hasImages = templateName === "TIMESTAMP_TEMPLATE.docx" || 
+                    templateName === "UNLOADING_LOADING_TEMPLATE.docx" ||
+                    data.timestamp_photo || 
+                    data.LOADING_IMAGE || 
+                    data.UNLOADING_IMAGE;
+
+  if (hasImages) {
+    const imageOptions = {
+      centered: true,
+      fileType: "docx",
+      getImage(tagValue: any) {
+        return base64Parser(tagValue);
+      },
+      getSize(imgValue: any, tagName: string) {
+        if (tagName === "LOADING_IMAGE" || tagName === "UNLOADING_IMAGE") {
+          return [450, 300];
+        }
+        return [500, 350];
+      }
+    };
+    modules.push(new ImageModule(imageOptions));
+  }
 
   const doc = new Docxtemplater(zip, {
     delimiters: { start: "{{", end: "}}" },
     paragraphLoop: true,
     linebreaks: true,
+    modules: modules,
+    nullGetter(part: any) {
+      return "";
+    }
   });
 
-  doc.setData(data);
-  doc.render();
+  console.log("Rendering docx with final data object:", JSON.stringify(sanitizedData, null, 2));
+
+  doc.render(sanitizedData);
 
   const outBlob = doc.getZip().generate({
     type: "blob",
@@ -192,6 +594,58 @@ export async function generateDocxBlob(
   return { blob: outBlob, warnings };
 }
 
+// Helper to parse sheets from workbook.xml and workbook.xml.rels
+interface SheetInfo {
+  name: string;
+  sheetId: string;
+  rId: string;
+  targetPath: string;
+}
+
+function parseSheets(zip: PizZip): SheetInfo[] {
+  const sheets: SheetInfo[] = [];
+  const workbookXmlStr = zip.file("xl/workbook.xml")?.asText();
+  const workbookRelsStr = zip.file("xl/_rels/workbook.xml.rels")?.asText();
+  if (!workbookXmlStr || !workbookRelsStr) return sheets;
+
+  // 1. Parse relationship targets
+  const rels: Record<string, string> = {};
+  const relMatches = workbookRelsStr.match(/<Relationship\s+[^>]+>/g) || [];
+  for (const relTag of relMatches) {
+    const typeMatch = relTag.match(/Type="([^"]+)"/);
+    if (typeMatch && typeMatch[1].includes("relationships/worksheet")) {
+      const idMatch = relTag.match(/Id="([^"]+)"/);
+      const targetMatch = relTag.match(/Target="([^"]+)"/);
+      if (idMatch && targetMatch) {
+        const id = idMatch[1];
+        let target = targetMatch[1];
+        if (!target.startsWith("xl/")) {
+          target = "xl/" + target;
+        }
+        rels[id] = target;
+      }
+    }
+  }
+
+  // 2. Parse sheet info
+  const sheetTags = workbookXmlStr.match(/<sheet\s+[^>]+>/g) || [];
+  for (const sheetTag of sheetTags) {
+    const nameMatch = sheetTag.match(/name="([^"]+)"/);
+    const sheetIdMatch = sheetTag.match(/sheetId="([^"]+)"/);
+    const rIdMatch = sheetTag.match(/r:id="([^"]+)"/) || sheetTag.match(/\brId="([^"]+)"/);
+    if (nameMatch && sheetIdMatch && rIdMatch) {
+      const name = nameMatch[1];
+      const sheetId = sheetIdMatch[1];
+      const rId = rIdMatch[1];
+      const targetPath = rels[rId];
+      if (targetPath) {
+        sheets.push({ name, sheetId, rId, targetPath });
+      }
+    }
+  }
+  return sheets;
+}
+
 // Generate Excel Blob + HTML with exact same core engine
 export async function generateXlsxBlob(
   templateName: string,
@@ -199,15 +653,448 @@ export async function generateXlsxBlob(
   itemsKey: string,
   items: any[]
 ): Promise<{ blob: Blob; html: string; warnings: string[] }> {
-  let response = await fetch(`/templates/${templateName}`);
-  if (!response.ok) {
-    response = await fetch(`/${templateName}`);
-  }
-  if (!response.ok) {
-    throw new Error(`Unable to load template '${templateName}'. Please verify public/templates/ directory.`);
+  const templatePath = `/templates/${templateName}`;
+  console.log(`[Runtime Template Load] Loading XLSX template from path: ${templatePath}`);
+  const fetchUrl = `${templatePath}?t=${Date.now()}`;
+
+  const response = await fetch(fetchUrl, { cache: "no-store" });
+  const contentType = response.headers.get("content-type") || "";
+
+  if (!response.ok || contentType.includes("text/html")) {
+    throw new Error(`Unable to load template directly from '${templatePath}'. Server returned error or HTML fallback instead of binary. Please verify public/templates/ directory.`);
   }
 
   const arrayBuffer = await response.arrayBuffer();
+  // Check magic bytes PK to prevent cryptic loading errors
+  const bytes = new Uint8Array(arrayBuffer.slice(0, 4));
+  if (bytes[0] !== 0x50 || bytes[1] !== 0x4B) {
+    throw new Error(`Invalid file format for template '${templateName}'. Expected a valid Office/ZIP document but received invalid binary.`);
+  }
+
+  if (
+    templateName === "PIS_TEMPLATE.xlsm" ||
+    templateName === "RFS_TEMPLATE.xlsm" ||
+    templateName === "HAZWASTE_TEMPLATE.xlsm" ||
+    templateName === "UNLOADING_LOADING_TEMPLATE.xlsm" ||
+    templateName === "TIME_STAMP_TEMPLATE.xlsm" ||
+    templateName === "WASTE_MOVEMENT_TEMPLATE.xlsm"
+  ) {
+    console.log(`[PizZip High-Fidelity Bypass] Handling ${templateName} via direct XML/ZIP manipulation.`);
+    const originalZip = new PizZip(arrayBuffer);
+    
+    // 1. Process sharedStrings.xml
+    let sharedStringsXml = originalZip.file("xl/sharedStrings.xml")?.asText() || "";
+    
+    if (templateName === "PIS_TEMPLATE.xlsm") {
+      sharedStringsXml = replacePlaceholdersInSharedStrings(sharedStringsXml, data);
+      let sheet1Xml = originalZip.file("xl/worksheets/sheet1.xml")?.asText() || "";
+      if (sheet1Xml) {
+        const hasPayments = !!(data.GROSS_1 || data.GROSS_2 || data.GROSS_3 || data.PAYMENT_PURPOSE_1 || data.PAYMENT_PURPOSE_2 || data.PAYMENT_PURPOSE_3);
+        
+        if (!hasPayments) {
+          // Clear payment labels and cells entirely to hide section
+          sheet1Xml = injectCellValue(sheet1Xml, "K14", "", true); // GROSS Label
+          sheet1Xml = injectCellValue(sheet1Xml, "N14", "", true); // EWT Label
+          sheet1Xml = injectCellValue(sheet1Xml, "U14", "", true); // TOTAL Label
+          sheet1Xml = injectCellValue(sheet1Xml, "K15", "", true); // GROSS 1
+          sheet1Xml = injectCellValue(sheet1Xml, "N15", "", true); // EWT 1
+          sheet1Xml = injectCellValue(sheet1Xml, "U15", "", true); // TOTAL 1
+          sheet1Xml = injectCellValue(sheet1Xml, "K16", "", true); // GROSS 2
+          sheet1Xml = injectCellValue(sheet1Xml, "N16", "", true); // EWT 2
+          sheet1Xml = injectCellValue(sheet1Xml, "U16", "", true); // TOTAL 2
+          sheet1Xml = injectCellValue(sheet1Xml, "K17", "", true); // GROSS 3
+          sheet1Xml = injectCellValue(sheet1Xml, "N17", "", true); // EWT 3
+          sheet1Xml = injectCellValue(sheet1Xml, "U17", "", true); // TOTAL 3
+        } else {
+          // Inject actual payment entries directly to support multiple rows
+          sheet1Xml = injectCellValue(sheet1Xml, "B15", data.PAYMENT_PURPOSE_1 || "", true);
+          sheet1Xml = injectCellValue(sheet1Xml, "K15", data.GROSS_1 || "", true);
+          sheet1Xml = injectCellValue(sheet1Xml, "N15", data.EWT_1 || "", true);
+          sheet1Xml = injectCellValue(sheet1Xml, "U15", data.TOTAL_1 || "", true);
+
+          sheet1Xml = injectCellValue(sheet1Xml, "B16", data.PAYMENT_PURPOSE_2 || "", true);
+          sheet1Xml = injectCellValue(sheet1Xml, "K16", data.GROSS_2 || "", true);
+          sheet1Xml = injectCellValue(sheet1Xml, "N16", data.EWT_2 || "", true);
+          sheet1Xml = injectCellValue(sheet1Xml, "U16", data.TOTAL_2 || "", true);
+
+          sheet1Xml = injectCellValue(sheet1Xml, "B17", data.PAYMENT_PURPOSE_3 || "", true);
+          sheet1Xml = injectCellValue(sheet1Xml, "K17", data.GROSS_3 || "", true);
+          sheet1Xml = injectCellValue(sheet1Xml, "N17", data.EWT_3 || "", true);
+          sheet1Xml = injectCellValue(sheet1Xml, "U17", data.TOTAL_3 || "", true);
+        }
+        originalZip.file("xl/worksheets/sheet1.xml", sheet1Xml);
+      }
+    } else if (templateName === "UNLOADING_LOADING_TEMPLATE.xlsm") {
+      // 1. Replacements in sharedStrings.xml
+      sharedStringsXml = sharedStringsXml.replace(/\{\{CONTROL_NO\}\}/g, data.CONTROL_NO || data.CA_NO || "");
+      sharedStringsXml = sharedStringsXml.replace(/\{\{CA_NO\}\}/g, data.CA_NO || data.CONTROL_NO || "");
+      sharedStringsXml = sharedStringsXml.replace(/\{\{SUBJECT_HEADER\}\}/g, data.SUBJECT_HEADER || "");
+      sharedStringsXml = sharedStringsXml.replace(/\{\{LOADING_TITLE\)/g, data.LOADING_TITLE || "");
+      sharedStringsXml = sharedStringsXml.replace(/\{\{UNLOADING_TITLE\)/g, data.UNLOADING_TITLE || "");
+      sharedStringsXml = sharedStringsXml.replace(/\{\{LOADING_DESCRIPTION\}\}/g, data.LOADING_DESCRIPTION || "");
+      sharedStringsXml = sharedStringsXml.replace(/\{\{UNLOADING_DESCRIPTION\}\}/g, data.UNLOADING_DESCRIPTION || "");
+      
+      // Clear the image placeholder text from displaying in cells on top of images
+      sharedStringsXml = sharedStringsXml.replace(/\{\{LOADING_IMAGE\}\}/g, "");
+      sharedStringsXml = sharedStringsXml.replace(/\{\{UNLOADING_IMAGE\}\}/g, "");
+
+      // 2. Inject images to xl/media/
+      const FALLBACK_1X1_PNG = "iVBOR00KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+      
+      let loadingBase64 = FALLBACK_1X1_PNG;
+      if (data.LOADING_IMAGE && data.LOADING_IMAGE.includes("base64,")) {
+        loadingBase64 = data.LOADING_IMAGE.split("base64,")[1];
+      }
+      
+      let unloadingBase64 = FALLBACK_1X1_PNG;
+      if (data.UNLOADING_IMAGE && data.UNLOADING_IMAGE.includes("base64,")) {
+        unloadingBase64 = data.UNLOADING_IMAGE.split("base64,")[1];
+      }
+
+      // Convert base64 to Uint8Array/Buffer so that PizZip can write it as binary
+      const loadingBuffer = typeof Buffer !== "undefined" 
+        ? Buffer.from(loadingBase64, "base64") 
+        : Uint8Array.from(atob(loadingBase64), c => c.charCodeAt(0));
+        
+      const unloadingBuffer = typeof Buffer !== "undefined" 
+        ? Buffer.from(unloadingBase64, "base64") 
+        : Uint8Array.from(atob(unloadingBase64), c => c.charCodeAt(0));
+
+      originalZip.file("xl/media/image2.png", loadingBuffer);
+      originalZip.file("xl/media/image3.png", unloadingBuffer);
+
+      // 3. Inject relationships to xl/drawings/_rels/drawing1.xml.rels
+      let drawingRelsXml = originalZip.file("xl/drawings/_rels/drawing1.xml.rels")?.asText() || "";
+      if (drawingRelsXml && !drawingRelsXml.includes("rIdImg1")) {
+        const rel1 = `<Relationship Id="rIdImg1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image2.png"/>`;
+        const rel2 = `<Relationship Id="rIdImg2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image3.png"/>`;
+        drawingRelsXml = drawingRelsXml.replace("</Relationships>", `${rel1}${rel2}</Relationships>`);
+        originalZip.file("xl/drawings/_rels/drawing1.xml.rels", drawingRelsXml);
+      }
+
+      // 4. Inject picture elements to xl/drawings/drawing1.xml
+      let drawingXml = originalZip.file("xl/drawings/drawing1.xml")?.asText() || "";
+      if (drawingXml && !drawingXml.includes("LoadingPhoto")) {
+        const loadingPicAnchor = `
+          <xdr:twoCellAnchor editAs="oneCell">
+            <xdr:from>
+              <xdr:col>3</xdr:col>
+              <xdr:colOff>0</xdr:colOff>
+              <xdr:row>30</xdr:row>
+              <xdr:rowOff>0</xdr:rowOff>
+            </xdr:from>
+            <xdr:to>
+              <xdr:col>8</xdr:col>
+              <xdr:colOff>0</xdr:colOff>
+              <xdr:row>44</xdr:row>
+              <xdr:rowOff>0</xdr:rowOff>
+            </xdr:to>
+            <xdr:pic>
+              <xdr:nvPicPr>
+                <xdr:cNvPr id="1001" name="LoadingPhoto"/>
+                <xdr:cNvPicPr>
+                  <a:picLocks noChangeAspect="1"/>
+                </xdr:cNvPicPr>
+              </xdr:nvPicPr>
+              <xdr:blipFill>
+                <a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="rIdImg1"/>
+                <a:stretch>
+                  <a:fillRect/>
+                </a:stretch>
+              </xdr:blipFill>
+              <xdr:spPr>
+                <a:xfrm>
+                  <a:off x="0" y="0"/>
+                  <a:ext cx="0" cy="0"/>
+                </a:xfrm>
+                <a:prstGeom prst="rect">
+                  <a:avLst/>
+                </a:prstGeom>
+              </xdr:spPr>
+            </xdr:pic>
+            <xdr:clientData/>
+          </xdr:twoCellAnchor>
+        `;
+
+        const unloadingPicAnchor = `
+          <xdr:twoCellAnchor editAs="oneCell">
+            <xdr:from>
+              <xdr:col>3</xdr:col>
+              <xdr:colOff>0</xdr:colOff>
+              <xdr:row>59</xdr:row>
+              <xdr:rowOff>0</xdr:rowOff>
+            </xdr:from>
+            <xdr:to>
+              <xdr:col>8</xdr:col>
+              <xdr:colOff>0</xdr:colOff>
+              <xdr:row>73</xdr:row>
+              <xdr:rowOff>0</xdr:rowOff>
+            </xdr:to>
+            <xdr:pic>
+              <xdr:nvPicPr>
+                <xdr:cNvPr id="1002" name="UnloadingPhoto"/>
+                <xdr:cNvPicPr>
+                  <a:picLocks noChangeAspect="1"/>
+                </xdr:cNvPicPr>
+              </xdr:nvPicPr>
+              <xdr:blipFill>
+                <a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="rIdImg2"/>
+                <a:stretch>
+                  <a:fillRect/>
+                </a:stretch>
+              </xdr:blipFill>
+              <xdr:spPr>
+                <a:xfrm>
+                  <a:off x="0" y="0"/>
+                  <a:ext cx="0" cy="0"/>
+                </a:xfrm>
+                <a:prstGeom prst="rect">
+                  <a:avLst/>
+                </a:prstGeom>
+              </xdr:spPr>
+            </xdr:pic>
+            <xdr:clientData/>
+          </xdr:twoCellAnchor>
+        `;
+
+        drawingXml = drawingXml.replace("</xdr:wsDr>", `${loadingPicAnchor}${unloadingPicAnchor}</xdr:wsDr>`);
+        originalZip.file("xl/drawings/drawing1.xml", drawingXml);
+      }
+    } else if (templateName === "HAZWASTE_TEMPLATE.xlsm") {
+      const firstItem = items[0] || {};
+      
+      // Replace general placeholders (CLIENT, MANIFEST, QUANTITY, DATE, MRR_NO, PREPARED_BY, etc.)
+      sharedStringsXml = replacePlaceholdersInSharedStrings(sharedStringsXml, data);
+      
+      let sheet13Xml = originalZip.file("xl/worksheets/sheet13.xml")?.asText() || "";
+      
+      // Helper to ensure numeric values are written as true Excel numbers (not text) with no unnecessary decimal formatting
+      const cleanNumeric = (val: any): any => {
+        if (val === undefined || val === null || val === "" || isNaN(Number(val))) {
+          return "";
+        }
+        return Number(val);
+      };
+
+      // Inject Item 1 in sheet13.xml (Row 7)
+      const firstClass = firstItem.classification || "104";
+      const firstDesc = firstItem.description || "";
+      const firstQty = firstItem.qty !== undefined ? cleanNumeric(firstItem.qty) : "";
+      const firstPct = firstItem.percentage !== undefined ? cleanNumeric(firstItem.percentage) / 100 : "";
+      const firstHw = firstItem.haz_waste !== undefined ? cleanNumeric(firstItem.haz_waste) : "";
+      const firstLt = firstItem.local_tsd !== undefined ? cleanNumeric(firstItem.local_tsd) : "";
+      const firstNh = firstItem.non_haz !== undefined ? cleanNumeric(firstItem.non_haz) : "";
+      const firstRem = firstItem.remarks || "";
+
+      sheet13Xml = injectCellValue(sheet13Xml, "A7", firstClass, true); // Classification
+      sheet13Xml = injectCellValue(sheet13Xml, "B7", firstDesc, true); // Description
+      sheet13Xml = injectCellValue(sheet13Xml, "C7", firstQty, false); // Qty
+      sheet13Xml = injectCellValue(sheet13Xml, "D7", firstPct, false); // Percentage
+      sheet13Xml = injectCellValue(sheet13Xml, "E7", firstHw, false); // Haz Waste
+      sheet13Xml = injectCellValue(sheet13Xml, "F7", firstLt, false); // Local TSD
+      sheet13Xml = injectCellValue(sheet13Xml, "G7", firstNh, false); // Non Haz
+      sheet13Xml = injectCellValue(sheet13Xml, "H7", firstRem, true); // Remarks
+
+      // Inject Item 2 to 11 in sheet13.xml (Rows 8 to 17)
+      for (let i = 1; i < 11; i++) {
+        const rowNum = 7 + i;
+        const item = items[i];
+        
+        const itemClass = item ? (item.classification || "104") : "";
+        const desc = item ? (item.description || "") : "";
+        const qty = item ? cleanNumeric(item.qty) : "";
+        const pct = item ? (item.percentage !== undefined ? cleanNumeric(item.percentage) / 100 : "") : "";
+        const hw = item ? cleanNumeric(item.haz_waste) : "";
+        const lt = item ? cleanNumeric(item.local_tsd) : "";
+        const nh = item ? cleanNumeric(item.non_haz) : "";
+        const rem = item ? (item.remarks || "") : "";
+
+        sheet13Xml = injectCellValue(sheet13Xml, `A${rowNum}`, itemClass, true); // Classification
+        sheet13Xml = injectCellValue(sheet13Xml, `B${rowNum}`, desc, true); // Description
+        sheet13Xml = injectCellValue(sheet13Xml, `C${rowNum}`, qty, false); // Qty
+        sheet13Xml = injectCellValue(sheet13Xml, `D${rowNum}`, pct, false); // Percentage
+        sheet13Xml = injectCellValue(sheet13Xml, `E${rowNum}`, hw, false); // Haz Waste
+        sheet13Xml = injectCellValue(sheet13Xml, `F${rowNum}`, lt, false); // Local TSD
+        sheet13Xml = injectCellValue(sheet13Xml, `G${rowNum}`, nh, false); // Non Haz
+        sheet13Xml = injectCellValue(sheet13Xml, `H${rowNum}`, rem, true); // Remarks
+      }
+
+      // Inject Totals directly as numeric values into sheet13.xml to avoid string formatting issues
+      sheet13Xml = injectCellValue(sheet13Xml, "C18", cleanNumeric(data.TOTAL_QTY), false);
+      sheet13Xml = injectCellValue(sheet13Xml, "E18", cleanNumeric(data.TOTAL_HAZ_WASTE), false);
+      sheet13Xml = injectCellValue(sheet13Xml, "F18", cleanNumeric(data.TOTAL_LOCAL_TSD), false);
+      sheet13Xml = injectCellValue(sheet13Xml, "G18", cleanNumeric(data.TOTAL_NON_HAZ), false);
+
+      originalZip.file("xl/worksheets/sheet13.xml", sheet13Xml);
+
+      // Remove calculation chain to prevent corrupt formula chain repair warning in Excel
+      originalZip.remove("xl/calcChain.xml");
+      let workbookRelsXml = originalZip.file("xl/_rels/workbook.xml.rels")?.asText() || "";
+      workbookRelsXml = workbookRelsXml.replace(/<Relationship[^>]+Type="[^"]+calcChain"[^>]*\/>/g, "");
+      originalZip.file("xl/_rels/workbook.xml.rels", workbookRelsXml);
+    } else if (templateName === "TIME_STAMP_TEMPLATE.xlsm") {
+      // 1. Process worksheet cells in sheet1.xml (since no placeholders in sharedStrings)
+      let sheet1Xml = originalZip.file("xl/worksheets/sheet1.xml")?.asText() || "";
+      if (sheet1Xml) {
+        // Inject Record ID at Cell B41
+        sheet1Xml = injectCellValue(sheet1Xml, "B41", data.ID || "", true);
+        sheet1Xml = injectCellValue(sheet1Xml, "A41", "RECORD ID:", true);
+        sheet1Xml = injectCellValue(sheet1Xml, "F41", "TIMESTAMP:", true);
+        sheet1Xml = injectCellValue(sheet1Xml, "G41", data.DATE || "", true);
+        sheet1Xml = injectCellValue(sheet1Xml, "A43", "COMPLIANCE CONTEXT NOTES & OTHER RELATED INFORMATION:", true);
+        sheet1Xml = injectCellValue(sheet1Xml, "A44", data.NOTES || "", true);
+        sheet1Xml = injectCellValue(sheet1Xml, "A46", "FILE NAME:", true);
+        sheet1Xml = injectCellValue(sheet1Xml, "C46", data.FILENAME || "", true);
+        sheet1Xml = injectCellValue(sheet1Xml, "A48", "This document serves as an official timestamp record for hazardous waste compliance auditing. The image above is a true and accurate representation of the verified operations at the specified date and time.", true);
+        sheet1Xml = injectCellValue(sheet1Xml, "A50", "SMEI HAZARDOUS WASTE MANAGEMENT SYSTEM - COMPLIANCE REGISTRY", true);
+
+        originalZip.file("xl/worksheets/sheet1.xml", sheet1Xml);
+      }
+
+      // 2. Inject image to xl/media/
+      const FALLBACK_1X1_PNG = "iVBOR00KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+      let timestampBase64 = FALLBACK_1X1_PNG;
+      if (data.timestamp_photo && data.timestamp_photo.includes("base64,")) {
+        timestampBase64 = data.timestamp_photo.split("base64,")[1];
+      } else if (data.photoData && data.photoData.includes("base64,")) {
+        timestampBase64 = data.photoData.split("base64,")[1];
+      }
+
+      const imgBuffer = typeof Buffer !== "undefined"
+        ? Buffer.from(timestampBase64, "base64")
+        : Uint8Array.from(atob(timestampBase64), c => c.charCodeAt(0));
+
+      originalZip.file("xl/media/image2.png", imgBuffer);
+
+      // 3. Create drawings relationship file: xl/drawings/_rels/drawing1.xml.rels
+      const drawingRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdImg1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image2.png"/>
+</Relationships>`;
+      originalZip.file("xl/drawings/_rels/drawing1.xml.rels", drawingRelsXml);
+
+      // 4. Replace Rectangle 3 containing {{TIMESTAMP_IMAGE}} in xl/drawings/drawing1.xml with the picture anchor
+      let drawingXml = originalZip.file("xl/drawings/drawing1.xml")?.asText() || "";
+      if (drawingXml) {
+        const imageAnchorRegex = /<xdr:twoCellAnchor>[^]*?\{\{TIMESTAMP_IMAGE\}\}[^]*?<\/xdr:twoCellAnchor>/g;
+        const timestampPicAnchor = `
+          <xdr:twoCellAnchor editAs="oneCell">
+            <xdr:from>
+              <xdr:col>0</xdr:col>
+              <xdr:colOff>0</xdr:colOff>
+              <xdr:row>3</xdr:row>
+              <xdr:rowOff>0</xdr:rowOff>
+            </xdr:from>
+            <xdr:to>
+              <xdr:col>10</xdr:col>
+              <xdr:colOff>0</xdr:colOff>
+              <xdr:row>40</xdr:row>
+              <xdr:rowOff>0</xdr:rowOff>
+            </xdr:to>
+            <xdr:pic>
+              <xdr:nvPicPr>
+                <xdr:cNvPr id="1001" name="TimestampPhoto"/>
+                <xdr:cNvPicPr>
+                  <a:picLocks noChangeAspect="1"/>
+                </xdr:cNvPicPr>
+              </xdr:nvPicPr>
+              <xdr:blipFill>
+                <a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="rIdImg1"/>
+                <a:stretch>
+                  <a:fillRect/>
+                </a:stretch>
+              </xdr:blipFill>
+              <xdr:spPr>
+                <a:xfrm>
+                  <a:off x="0" y="0"/>
+                  <a:ext cx="0" cy="0"/>
+                </a:xfrm>
+                <a:prstGeom prst="rect">
+                  <a:avLst/>
+                </a:prstGeom>
+              </xdr:spPr>
+            </xdr:pic>
+            <xdr:clientData/>
+          </xdr:twoCellAnchor>
+        `;
+        drawingXml = drawingXml.replace(imageAnchorRegex, timestampPicAnchor);
+        originalZip.file("xl/drawings/drawing1.xml", drawingXml);
+      }
+    } else if (templateName === "WASTE_MOVEMENT_TEMPLATE.xlsm") {
+      sharedStringsXml = replacePlaceholdersInSharedStrings(sharedStringsXml, data);
+      
+      let sheet18Xml = originalZip.file("xl/worksheets/sheet18.xml")?.asText() || "";
+      if (sheet18Xml) {
+        const cleanNumeric = (val: any): any => {
+          if (val === undefined || val === null || val === "" || isNaN(Number(val))) {
+            return "";
+          }
+          return Number(val);
+        };
+        sheet18Xml = injectCellValue(sheet18Xml, "G45", cleanNumeric(data.QUANTITY_1), false);
+        sheet18Xml = injectCellValue(sheet18Xml, "G46", cleanNumeric(data.QUANTITY_2), false);
+        sheet18Xml = injectCellValue(sheet18Xml, "G47", cleanNumeric(data.QUANTITY_3), false);
+        sheet18Xml = injectCellValue(sheet18Xml, "G48", cleanNumeric(data.TOTAL_QTY), false);
+        
+        originalZip.file("xl/worksheets/sheet18.xml", sheet18Xml);
+      }
+      
+      // Remove calculation chain to prevent corrupt formula chain repair warning in Excel
+      originalZip.remove("xl/calcChain.xml");
+      let workbookRelsXml = originalZip.file("xl/_rels/workbook.xml.rels")?.asText() || "";
+      workbookRelsXml = workbookRelsXml.replace(/<Relationship[^>]+Type="[^"]+calcChain"[^>]*\/>/g, "");
+      originalZip.file("xl/_rels/workbook.xml.rels", workbookRelsXml);
+    } else {
+      // RFS_TEMPLATE.xlsm
+      // We substitute Item 1 in shared strings
+      const item1 = items[0] || {};
+      const rfsData = {
+        ...data,
+        QTY: item1.quantity !== undefined ? item1.quantity : "",
+        UNIT: item1.unit || "",
+        ITEM_DESCRIPTION: item1.item || "",
+        REMARKS: item1.remarks || ""
+      };
+      sharedStringsXml = replacePlaceholdersInSharedStrings(sharedStringsXml, rfsData);
+      
+      // Inject Item 2 to 12 in sheet1.xml
+      let sheet1Xml = originalZip.file("xl/worksheets/sheet1.xml")?.asText() || "";
+      for (let i = 1; i < 12; i++) {
+        const rowNum = 13 + i;
+        const item = items[i];
+        const qty = item ? (item.quantity ?? "") : "";
+        const unit = item ? (item.unit ?? "") : "";
+        const desc = item ? (item.item ?? "") : "";
+        const rem = item ? (item.remarks ?? "") : "";
+
+        sheet1Xml = injectCellValue(sheet1Xml, `I${rowNum}`, qty, false); // Qty
+        sheet1Xml = injectCellValue(sheet1Xml, `K${rowNum}`, unit, true); // Unit
+        sheet1Xml = injectCellValue(sheet1Xml, `M${rowNum}`, desc, true); // Desc
+        sheet1Xml = injectCellValue(sheet1Xml, `BB${rowNum}`, rem, true); // Remarks
+      }
+      originalZip.file("xl/worksheets/sheet1.xml", sheet1Xml);
+    }
+    
+    originalZip.file("xl/sharedStrings.xml", sharedStringsXml);
+    
+    const finalBuffer = originalZip.generate({ type: "uint8array" });
+    const outBlob = originalZip.generate({
+      type: "blob",
+      mimeType: "application/vnd.ms-excel.sheet.macroEnabled.12",
+    });
+    
+    // Load for preview
+    const previewWorkbook = new ExcelJS.Workbook();
+    await previewWorkbook.xlsx.load(finalBuffer);
+    const html = convertExcelToHtml(previewWorkbook);
+    
+    return {
+      blob: outBlob,
+      html,
+      warnings: []
+    };
+  }
+
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(arrayBuffer);
 
@@ -360,7 +1247,7 @@ export async function generateXlsxBlob(
               const replacedVal = data[key] !== undefined ? data[key] : "";
               cellStr = cellStr.replace(m, String(replacedVal));
             });
-            cell.value = (isNaN(Number(cellStr)) || cellStr === "" || cellStr.startsWith("0") && cellStr.length > 1) ? cellStr : Number(cellStr);
+            cell.value = (isNaN(Number(cellStr)) || cellStr.trim() === "" || cellStr.startsWith("0") && cellStr.length > 1) ? cellStr : Number(cellStr);
           }
         }
       });
@@ -369,6 +1256,66 @@ export async function generateXlsxBlob(
     // General excel template cloner
     workbook.eachSheet((worksheet) => {
       resolveSharedFormulas(worksheet);
+
+      // Scan and replace custom placeholders and images
+      let loadingImgCell: { row: number; col: number } | null = null;
+      let unloadingImgCell: { row: number; col: number } | null = null;
+
+      for (let r = 1; r <= worksheet.rowCount; r++) {
+        const row = worksheet.getRow(r);
+        row.eachCell({ includeEmpty: true }, (cell, cNum) => {
+          const val = cell.value;
+          if (typeof val === "string") {
+            if (val.includes("{{LOADING_IMAGE}}")) {
+              loadingImgCell = { row: r, col: cNum };
+              cell.value = "";
+            } else if (val.includes("{{UNLOADING_IMAGE}}")) {
+              unloadingImgCell = { row: r, col: cNum };
+              cell.value = "";
+            } else if (val.includes("{{LOADING_TITLE")) {
+              const replaced = val.replace("{{LOADING_TITLE", data.LOADING_TITLE || "");
+              cell.value = replaced;
+            } else if (val.includes("{{UNLOADING_TITLE")) {
+              const replaced = val.replace("{{UNLOADING_TITLE", data.UNLOADING_TITLE || "");
+              cell.value = replaced;
+            }
+          }
+        });
+      }
+
+      if (loadingImgCell && data.LOADING_IMAGE && data.LOADING_IMAGE.startsWith("data:image/")) {
+        try {
+          const base64Data = data.LOADING_IMAGE.split(",")[1];
+          const imageId = workbook.addImage({
+            base64: base64Data,
+            extension: "png",
+          });
+          worksheet.addImage(imageId, {
+            tl: { col: 3, row: 30 } as any,
+            br: { col: 8, row: 44 } as any,
+            editAs: "oneCell"
+          });
+        } catch (e) {
+          console.error("Failed to add loading image to Excel", e);
+        }
+      }
+
+      if (unloadingImgCell && data.UNLOADING_IMAGE && data.UNLOADING_IMAGE.startsWith("data:image/")) {
+        try {
+          const base64Data = data.UNLOADING_IMAGE.split(",")[1];
+          const imageId = workbook.addImage({
+            base64: base64Data,
+            extension: "png",
+          });
+          worksheet.addImage(imageId, {
+            tl: { col: 3, row: 59 } as any,
+            br: { col: 8, row: 73 } as any,
+            editAs: "oneCell"
+          });
+        } catch (e) {
+          console.error("Failed to add unloading image to Excel", e);
+        }
+      }
 
       let repeatingRowIndex = -1;
       for (let r = 1; r <= worksheet.rowCount; r++) {
@@ -443,7 +1390,7 @@ export async function generateXlsxBlob(
                   cellStr = cellStr.replace(m, String(replacedVal));
                 });
               }
-              currentCell.value = (isNaN(Number(cellStr)) || cellStr === "" || cellStr.startsWith("0") && cellStr.length > 1) ? cellStr : Number(cellStr);
+              currentCell.value = (isNaN(Number(cellStr)) || cellStr.trim() === "" || cellStr.startsWith("0") && cellStr.length > 1) ? cellStr : Number(cellStr);
             }
           });
         }
@@ -476,7 +1423,7 @@ export async function generateXlsxBlob(
                   return;
                 }
               }
-              cell.value = (isNaN(Number(cellStr)) || cellStr === "" || cellStr.startsWith("0") && cellStr.length > 1) ? cellStr : Number(cellStr);
+              cell.value = (isNaN(Number(cellStr)) || cellStr.trim() === "" || cellStr.startsWith("0") && cellStr.length > 1) ? cellStr : Number(cellStr);
             }
           } else if (val && typeof val === "object" && (val as any).richText && Array.isArray((val as any).richText)) {
             const rtArray = JSON.parse(JSON.stringify((val as any).richText));
@@ -504,20 +1451,439 @@ export async function generateXlsxBlob(
   }
 
   const outBuffer = await workbook.xlsx.writeBuffer();
-  const outBlob = new Blob([outBuffer], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  });
+  let outBlob: Blob;
 
-  // Convert Excel workbook to HTML using SheetJS
+  if (templateName.endsWith(".xlsm")) {
+    const originalZip = new PizZip(arrayBuffer);
+    const exceljsZip = new PizZip(outBuffer);
+
+    const originalSheets = parseSheets(originalZip);
+    const exceljsSheets = parseSheets(exceljsZip);
+
+    console.log("[Reverse-Merge] Original sheets:", originalSheets);
+    console.log("[Reverse-Merge] ExcelJS sheets:", exceljsSheets);
+
+    // Overwrite worksheets based on sheet name mapping
+    exceljsSheets.forEach((ejSheet) => {
+      const origSheet = originalSheets.find((os) => os.name === ejSheet.name);
+      if (origSheet) {
+        const file = exceljsZip.file(ejSheet.targetPath);
+        if (file) {
+          let sheetXml = file.asText();
+          const originalSheetXml = originalZip.file(origSheet.targetPath)?.asText();
+          if (originalSheetXml) {
+            // Preserving drawing
+            const drawingMatch = originalSheetXml.match(/<drawing\s+[^>]*?\br:id=(["'])(.*?)\1/);
+            if (drawingMatch) {
+              const drawingId = drawingMatch[2];
+              if (!sheetXml.includes("<drawing") && !sheetXml.includes("</drawing>")) {
+                sheetXml = sheetXml.replace(/<\/worksheet>\s*$/, `<drawing r:id="${drawingId}"/></worksheet>`);
+              }
+            }
+
+            // Preserving legacyDrawing (for Form controls/macros)
+            const legacyDrawingMatch = originalSheetXml.match(/<legacyDrawing\s+[^>]*?\br:id=(["'])(.*?)\1/);
+            if (legacyDrawingMatch) {
+              const legacyId = legacyDrawingMatch[2];
+              if (!sheetXml.includes("<legacyDrawing") && !sheetXml.includes("</legacyDrawing>")) {
+                sheetXml = sheetXml.replace(/<\/worksheet>\s*$/, `<legacyDrawing r:id="${legacyId}"/></worksheet>`);
+              }
+            }
+
+            // Preserving pageSetup r:id (must come before drawing and legacyDrawing)
+            const pageSetupMatch = originalSheetXml.match(/<pageSetup\s+[^>]*?\br:id=(["'])(.*?)\1/);
+            if (pageSetupMatch) {
+              const pageSetupId = pageSetupMatch[2];
+              if (sheetXml.includes("<pageSetup")) {
+                sheetXml = sheetXml.replace(/<pageSetup(?![^>]*\br:id=)/, `<pageSetup r:id="${pageSetupId}"`);
+              } else {
+                let inserted = false;
+                for (const tag of ["<drawing", "<legacyDrawing", "</worksheet>"]) {
+                  if (sheetXml.includes(tag)) {
+                    sheetXml = sheetXml.replace(tag, `<pageSetup r:id="${pageSetupId}"/>${tag}`);
+                    inserted = true;
+                    break;
+                  }
+                }
+                if (!inserted) {
+                  sheetXml = sheetXml.replace(/<\/worksheet>\s*$/, `<pageSetup r:id="${pageSetupId}"/></worksheet>`);
+                }
+              }
+            }
+          }
+          // Overwrite the original template's worksheet path instead of adding an orphan
+          originalZip.file(origSheet.targetPath, sheetXml);
+          console.log(`[Reverse-Merge] Successfully overwrote "${origSheet.targetPath}" with mapped sheet "${ejSheet.name}"`);
+
+          // Also copy the worksheet relationship file to keep drawings/images linked correctly
+          const parts = ejSheet.targetPath.split("/");
+          const filename = parts.pop();
+          const relsPath = [...parts, "_rels", filename + ".rels"].join("/");
+
+          const origParts = origSheet.targetPath.split("/");
+          const origFilename = origParts.pop();
+          const origRelsPath = [...origParts, "_rels", origFilename + ".rels"].join("/");
+
+          const ejRelsFile = exceljsZip.file(relsPath);
+          if (ejRelsFile) {
+            originalZip.file(origRelsPath, ejRelsFile.asText());
+            console.log(`[Reverse-Merge] Successfully copied worksheet rels from "${relsPath}" to "${origRelsPath}"`);
+          }
+        }
+      } else {
+        console.warn(`[Reverse-Merge] Warning: No matching sheet in original workbook for name "${ejSheet.name}"`);
+      }
+    });
+
+    // Copy all drawings and media files to originalZip so that drawing resources are intact
+    Object.keys(exceljsZip.files).forEach((filePath) => {
+      if (filePath.startsWith("xl/drawings/") || filePath.startsWith("xl/media/")) {
+        const file = exceljsZip.file(filePath);
+        if (file && !filePath.endsWith("/")) {
+          originalZip.file(filePath, file.asUint8Array());
+          console.log(`[Reverse-Merge] Copied resource file to original zip: ${filePath}`);
+        }
+      }
+    });
+
+    // Overwrite sharedStrings
+    const sharedStringsXml = exceljsZip.file("xl/sharedStrings.xml")?.asText();
+    if (sharedStringsXml) {
+      originalZip.file("xl/sharedStrings.xml", sharedStringsXml);
+    }
+
+    // Do NOT overwrite xl/styles.xml to preserve original styles perfectly!
+
+    outBlob = originalZip.generate({
+      type: "blob",
+      mimeType: "application/vnd.ms-excel.sheet.macroEnabled.12",
+    });
+  } else {
+    outBlob = new Blob([outBuffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+  }
+
+  // Convert Excel workbook to HTML using custom high-fidelity parser to preserve all formatting
   let html = "";
   try {
-    const wb = XLSX.read(outBuffer, { type: "array" });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    html = XLSX.utils.sheet_to_html(ws, { editable: false });
+    html = convertExcelToHtml(workbook);
   } catch (err) {
-    console.error("SheetJS conversion error:", err);
-    html = `<div class="p-4 text-rose-500">Failed to render Excel as HTML table.</div>`;
+    console.error("High-fidelity Excel HTML rendering error, falling back to basic conversion:", err);
+    try {
+      const wb = XLSX.read(outBuffer, { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      html = XLSX.utils.sheet_to_html(ws, { editable: false });
+    } catch (fallbackErr) {
+      console.error("SheetJS fallback conversion error:", fallbackErr);
+      html = `<div class="p-4 text-rose-500">Failed to render Excel as HTML table.</div>`;
+    }
   }
 
   return { blob: outBlob, html, warnings };
+}
+
+// ==========================================
+// High-Fidelity Excel to HTML Conversion Helpers
+// ==========================================
+
+function parseCellAddress(addr: string): { row: number; col: number } {
+  const match = addr.match(/^([A-Z]+)([0-9]+)$/);
+  if (!match) return { row: 1, col: 1 };
+  const colStr = match[1];
+  const row = parseInt(match[2], 10);
+  let col = 0;
+  for (let i = 0; i < colStr.length; i++) {
+    col = col * 26 + (colStr.charCodeAt(i) - 64);
+  }
+  return { row, col };
+}
+
+function getCellAddress(row: number, col: number): string {
+  let colStr = "";
+  let temp = col;
+  while (temp > 0) {
+    const modulo = (temp - 1) % 26;
+    colStr = String.fromCharCode(65 + modulo) + colStr;
+    temp = Math.floor((temp - modulo) / 26);
+  }
+  return `${colStr}${row}`;
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function escapeXml(text: string): string {
+  return escapeHtml(text);
+}
+
+function mapBorderEdge(borderVal: any, edge: string, gridlinesVisible: boolean): string {
+  if (borderVal && borderVal.style) {
+    let width = "1px";
+    let style = "solid";
+    if (borderVal.style === "medium") width = "2px";
+    else if (borderVal.style === "thick") width = "3px";
+    else if (borderVal.style === "double") {
+      width = "3px";
+      style = "double";
+    } else if (borderVal.style === "dotted") {
+      style = "dotted";
+    } else if (borderVal.style === "dashed") {
+      style = "dashed";
+    }
+    
+    let color = "#000000";
+    if (borderVal.color && borderVal.color.argb) {
+      const argb = borderVal.color.argb;
+      color = argb.length === 8 ? `#${argb.substring(2)}` : `#${argb}`;
+    }
+    return `border-${edge}: ${width} ${style} ${color} !important;`;
+  }
+  return gridlinesVisible ? `border-${edge}: 1px solid #d1d5db !important;` : `border-${edge}: none !important;`;
+}
+
+function convertExcelToHtml(workbook: ExcelJS.Workbook): string {
+  const worksheet = workbook.worksheets[0];
+  if (!worksheet) return "";
+
+  const gridlinesVisible = worksheet.views && worksheet.views[0] ? (worksheet.views[0].showGridLines !== false) : true;
+
+  // Find max columns and rows to render
+  let maxCol = 1;
+  let maxRow = worksheet.rowCount;
+  
+  worksheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
+    if (rowNumber > maxRow) maxRow = rowNumber;
+    row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+      if (colNumber > maxCol) {
+        maxCol = colNumber;
+      }
+    });
+  });
+
+  // Parse merged cells to identify rowspan/colspan
+  const merges: Record<string, { rowspan: number; colspan: number; isMaster: boolean }> = {};
+  if (worksheet.model && worksheet.model.merges) {
+    worksheet.model.merges.forEach((mergeRangeStr: string) => {
+      const parts = mergeRangeStr.split(":");
+      if (parts.length === 2) {
+        const start = parseCellAddress(parts[0]);
+        const end = parseCellAddress(parts[1]);
+        const startCellAddr = parts[0];
+        const rowspan = end.row - start.row + 1;
+        const colspan = end.col - start.col + 1;
+        
+        merges[startCellAddr] = { rowspan, colspan, isMaster: true };
+        for (let r = start.row; r <= end.row; r++) {
+          for (let c = start.col; c <= end.col; c++) {
+            if (r === start.row && c === start.col) continue;
+            const addr = getCellAddress(r, c);
+            merges[addr] = { rowspan: 0, colspan: 0, isMaster: false };
+          }
+        }
+      }
+    });
+  }
+
+  let html = `<table class="excel-table" style="border-collapse: collapse; width: auto; background-color: #ffffff; table-layout: fixed; margin: 0 auto; color: #000000; font-family: Calibri, sans-serif;">`;
+
+  // Col group for column widths
+  html += "<colgroup>";
+  for (let c = 1; c <= maxCol; c++) {
+    const col = worksheet.getColumn(c);
+    const widthPx = col.width ? Math.round(col.width * 8.4) : 80;
+    html += `<col style="width: ${widthPx}px; min-width: ${widthPx}px; max-width: ${widthPx}px;" />`;
+  }
+  html += "</colgroup>";
+
+  // Rows
+  for (let r = 1; r <= maxRow; r++) {
+    const row = worksheet.getRow(r);
+    const heightPt = row.height;
+    const heightStyle = heightPt ? `height: ${Math.round(heightPt * 1.33)}px;` : "";
+    const displayStyle = row.hidden ? "display: none;" : "";
+
+    html += `<tr style="${heightStyle} ${displayStyle}">`;
+
+    for (let c = 1; c <= maxCol; c++) {
+      const cellAddress = getCellAddress(r, c);
+      const mergeInfo = merges[cellAddress];
+      if (mergeInfo && !mergeInfo.isMaster) {
+        // Skip rendering non-master merged cells
+        continue;
+      }
+
+      const cell = row.getCell(c);
+      let cellStyles: string[] = [];
+
+      // Alignment
+      if (cell.alignment) {
+        const align = cell.alignment;
+        if (align.horizontal) {
+          cellStyles.push(`text-align: ${align.horizontal};`);
+        }
+        if (align.vertical) {
+          const vAlign = align.vertical === "middle" ? "middle" : align.vertical;
+          cellStyles.push(`vertical-align: ${vAlign};`);
+        }
+        if (align.wrapText) {
+          cellStyles.push(`white-space: normal; word-break: break-all;`);
+        } else {
+          cellStyles.push(`white-space: nowrap;`);
+        }
+      } else {
+        cellStyles.push(`vertical-align: middle; white-space: nowrap;`);
+      }
+
+      // Font
+      if (cell.font) {
+        const font = cell.font;
+        if (font.name) {
+          cellStyles.push(`font-family: '${font.name}', Calibri, Arial, sans-serif;`);
+        }
+        if (font.size) {
+          cellStyles.push(`font-size: ${font.size}pt;`);
+        }
+        if (font.bold) {
+          cellStyles.push(`font-weight: bold;`);
+        }
+        if (font.italic) {
+          cellStyles.push(`font-style: italic;`);
+        }
+        if (font.underline) {
+          cellStyles.push(`text-decoration: underline;`);
+        }
+        if (font.color && font.color.argb) {
+          const argb = font.color.argb;
+          const hexColor = argb.length === 8 ? `#${argb.substring(2)}` : `#${argb}`;
+          cellStyles.push(`color: ${hexColor};`);
+        }
+      }
+
+      // Fill (Background)
+      if (cell.fill && cell.fill.type === "pattern" && cell.fill.pattern === "solid") {
+        const fgColor = cell.fill.fgColor;
+        if (fgColor && fgColor.argb) {
+          const argb = fgColor.argb;
+          const hexColor = argb.length === 8 ? `#${argb.substring(2)}` : `#${argb}`;
+          cellStyles.push(`background-color: ${hexColor} !important;`);
+        }
+      }
+
+      // Borders
+      const border = cell.border || {};
+      cellStyles.push(mapBorderEdge(border.top, "top", gridlinesVisible));
+      cellStyles.push(mapBorderEdge(border.bottom, "bottom", gridlinesVisible));
+      cellStyles.push(mapBorderEdge(border.left, "left", gridlinesVisible));
+      cellStyles.push(mapBorderEdge(border.right, "right", gridlinesVisible));
+
+      const styleAttr = cellStyles.join(" ");
+
+      // Merging attributes
+      const rowspanAttr = mergeInfo && mergeInfo.rowspan > 1 ? ` rowspan="${mergeInfo.rowspan}"` : "";
+      const colspanAttr = mergeInfo && mergeInfo.colspan > 1 ? ` colspan="${mergeInfo.colspan}"` : "";
+
+      // Cell value rendering
+      let cellContent = "";
+      const val = cell.value;
+      if (val !== null && val !== undefined) {
+        if (typeof val === "object") {
+          if ("richText" in val && Array.isArray((val as any).richText)) {
+            (val as any).richText.forEach((rt: any) => {
+              let rtStyle = "";
+              if (rt.font) {
+                if (rt.font.bold) rtStyle += "font-weight: bold;";
+                if (rt.font.italic) rtStyle += "font-style: italic;";
+                if (rt.font.size) rtStyle += `font-size: ${rt.font.size}pt;`;
+                if (rt.font.color && rt.font.color.argb) {
+                  const argb = rt.font.color.argb;
+                  rtStyle += `color: ${argb.length === 8 ? `#${argb.substring(2)}` : `#${argb}`};`;
+                }
+              }
+              cellContent += `<span style="${rtStyle}">${escapeHtml(rt.text || "")}</span>`;
+            });
+          } else if ("formula" in val) {
+            const formulaVal = val as any;
+            cellContent = formulaVal.result !== undefined && formulaVal.result !== null ? escapeHtml(String(formulaVal.result)) : "";
+          } else if ("text" in val) {
+            cellContent = escapeHtml(String((val as any).text));
+          } else {
+            cellContent = escapeHtml(String(val));
+          }
+        } else if ((val as any) instanceof Date) {
+          cellContent = escapeHtml(cell.text || (val as any).toLocaleDateString());
+        } else {
+          cellContent = escapeHtml(String(val));
+        }
+      }
+
+      html += `<td style="${styleAttr}"${rowspanAttr}${colspanAttr}>${cellContent}</td>`;
+    }
+    html += "</tr>";
+  }
+
+  html += "</table>";
+  return html;
+}
+
+// ==========================================
+// PizZip Layout-Preserving Helper Functions
+// ==========================================
+
+function replacePlaceholdersInSharedStrings(sharedStringsXml: string, data: Record<string, any>): string {
+  return sharedStringsXml.replace(/\{\{([^{}]+)\}\}/g, (match, key) => {
+    const trimmedKey = key.trim();
+    // Try exact trimmed key
+    if (data[trimmedKey] !== undefined) {
+      return escapeXml(String(data[trimmedKey]));
+    }
+    // Try uppercase trimmed key
+    const upperKey = trimmedKey.toUpperCase();
+    if (data[upperKey] !== undefined) {
+      return escapeXml(String(data[upperKey]));
+    }
+    // Try replacing space with underscore
+    const snakeKey = trimmedKey.replace(/\s+/g, "_");
+    if (data[snakeKey] !== undefined) {
+      return escapeXml(String(data[snakeKey]));
+    }
+    const upperSnakeKey = snakeKey.toUpperCase();
+    if (data[upperSnakeKey] !== undefined) {
+      return escapeXml(String(data[upperSnakeKey]));
+    }
+    // Try replacing underscore with space
+    const spaceKey = trimmedKey.replace(/_/g, " ");
+    if (data[spaceKey] !== undefined) {
+      return escapeXml(String(data[spaceKey]));
+    }
+    const upperSpaceKey = spaceKey.toUpperCase();
+    if (data[upperSpaceKey] !== undefined) {
+      return escapeXml(String(data[upperSpaceKey]));
+    }
+    return ""; // Empty string for unresolved placeholders
+  });
+}
+
+function injectCellValue(sheetXml: string, cellRef: string, val: any, isString: boolean = false): string {
+  const cellRegex = new RegExp('<c\\s+[^>]*?\\br="' + cellRef + '"[^>]*?\\bs="(\\d+)"[^>]*?(?:\\/>|>([\\s\\S]*?)<\\/c>)', 'i');
+  const match = sheetXml.match(cellRegex);
+  if (!match) {
+    return sheetXml;
+  }
+  const styleId = match[1];
+  let newCell = "";
+  if (val === undefined || val === null || val === "") {
+    newCell = `<c r="${cellRef}" s="${styleId}"/>`;
+  } else if (isString) {
+    newCell = `<c r="${cellRef}" s="${styleId}" t="inlineStr"><is><t>${escapeXml(val)}</t></is></c>`;
+  } else {
+    newCell = `<c r="${cellRef}" s="${styleId}"><v>${val}</v></c>`;
+  }
+  return sheetXml.replace(match[0], newCell);
 }

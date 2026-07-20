@@ -25,6 +25,235 @@ export default function RoleManagement() {
   const [newRoleName, setNewRoleName] = useState("");
   const [isCreatingRole, setIsCreatingRole] = useState(false);
 
+  // Dynamic Module Security PIN protection states
+  interface PinProtectionRule {
+    id: string;
+    moduleName: string;
+    actionName: string;
+    pinCode: string;
+    isEnabled: boolean;
+  }
+
+  const [modulePins, setModulePins] = useState<PinProtectionRule[]>([]);
+  const [showAddPinRule, setShowAddPinRule] = useState(false);
+  const [newPinModuleName, setNewPinModuleName] = useState("Purchase Order");
+  const [newPinCode, setNewPinCode] = useState("");
+
+  const [isGlobalPinEnabled, setIsGlobalPinEnabled] = useState<boolean>(() => {
+    const savedSetting = localStorage.getItem("smei_security_config");
+    if (savedSetting !== null) {
+      try {
+        return JSON.parse(savedSetting).enabled;
+      } catch (e) {
+        return false;
+      }
+    }
+    return false;
+  });
+
+  const handleToggleGlobalPin = () => {
+    const newValue = !isGlobalPinEnabled;
+    setIsGlobalPinEnabled(newValue);
+    localStorage.setItem("smei_security_config", JSON.stringify({ enabled: newValue }));
+  };
+
+  const [isPortalPinEnabled, setIsPortalPinEnabled] = useState<boolean>(() => {
+    const savedSetting = localStorage.getItem("smei_portal_security_config");
+    if (savedSetting !== null) {
+      try {
+        return JSON.parse(savedSetting).enabled;
+      } catch (e) {
+        return false;
+      }
+    }
+    return false;
+  });
+
+  const [poPortalPinCode, setPoPortalPinCode] = useState<string>(() => {
+    const savedSetting = localStorage.getItem("smei_portal_security_config");
+    if (savedSetting !== null) {
+      try {
+        const parsed = JSON.parse(savedSetting);
+        return parsed.poPinCode || parsed.pinCode || "1111";
+      } catch (e) {
+        return "1111";
+      }
+    }
+    return "1111";
+  });
+
+  const [tsdPortalPinCode, setTsdPortalPinCode] = useState<string>(() => {
+    const savedSetting = localStorage.getItem("smei_portal_security_config");
+    if (savedSetting !== null) {
+      try {
+        const parsed = JSON.parse(savedSetting);
+        return parsed.tsdPinCode || parsed.pinCode || "1111";
+      } catch (e) {
+        return "1111";
+      }
+    }
+    return "1111";
+  });
+
+  // Modal PIN Editor state to prevent uncontrolled instant-edit
+  const [editingPinType, setEditingPinType] = useState<"po" | "tsd" | "module" | null>(null);
+  const [editingModuleRuleId, setEditingModuleRuleId] = useState<string | null>(null);
+  const [tempNewPin, setTempNewPin] = useState("");
+  const [tempConfirmPin, setTempConfirmPin] = useState("");
+  const [pinEditError, setPinEditError] = useState("");
+
+  const handleTogglePortalPin = () => {
+    const newValue = !isPortalPinEnabled;
+    setIsPortalPinEnabled(newValue);
+    localStorage.setItem("smei_portal_security_config", JSON.stringify({
+      enabled: newValue,
+      poPinCode: poPortalPinCode,
+      tsdPinCode: tsdPortalPinCode
+    }));
+  };
+
+  const closePinEditor = () => {
+    setEditingPinType(null);
+    setEditingModuleRuleId(null);
+    setTempNewPin("");
+    setTempConfirmPin("");
+    setPinEditError("");
+  };
+
+  const saveEditedPin = () => {
+    if (!tempNewPin) {
+      setPinEditError("PIN code cannot be empty.");
+      return;
+    }
+    if (tempNewPin.length < 4) {
+      setPinEditError("PIN code must be at least 4 digits.");
+      return;
+    }
+    if (tempNewPin !== tempConfirmPin) {
+      setPinEditError("New PIN and Confirm New PIN do not match.");
+      return;
+    }
+
+    if (editingPinType === "po") {
+      setPoPortalPinCode(tempNewPin);
+      localStorage.setItem("smei_portal_security_config", JSON.stringify({
+        enabled: isPortalPinEnabled,
+        poPinCode: tempNewPin,
+        tsdPinCode: tsdPortalPinCode
+      }));
+      setSuccess("PO Portal PIN code updated successfully!");
+    } else if (editingPinType === "tsd") {
+      setTsdPortalPinCode(tempNewPin);
+      localStorage.setItem("smei_portal_security_config", JSON.stringify({
+        enabled: isPortalPinEnabled,
+        poPinCode: poPortalPinCode,
+        tsdPinCode: tempNewPin
+      }));
+      setSuccess("TSD Portal PIN code updated successfully!");
+    } else if (editingPinType === "module" && editingModuleRuleId) {
+      const updated = modulePins.map((rule) => {
+        if (rule.id === editingModuleRuleId) {
+          return { ...rule, pinCode: tempNewPin };
+        }
+        return rule;
+      });
+      saveModulePins(updated);
+      setSuccess("Module security PIN code updated successfully!");
+    }
+
+    setTimeout(() => setSuccess(""), 4000);
+    closePinEditor();
+  };
+
+  // Load and initialize dynamic security PIN rules
+  useEffect(() => {
+    const defaultRules = [
+      { id: "po_status_change", moduleName: "Purchase Order", actionName: "Access Purchase Orders", pinCode: "1234", isEnabled: true },
+      { id: "rfs_approval", moduleName: "Request For Supply", actionName: "Access Request For Supply", pinCode: "5678", isEnabled: true },
+      { id: "rfs_approval_gate", moduleName: "Request For Supply (RFS) Approval", actionName: "Access Request For Supply (RFS) Approval", pinCode: "7777", isEnabled: true },
+      { id: "pis_access", moduleName: "Payment Instruction Slip", actionName: "Access Payment Instruction Slip", pinCode: "4321", isEnabled: true },
+      { id: "canvass_access", moduleName: "Canvass Sheet", actionName: "Access Canvass Sheets", pinCode: "9999", isEnabled: true }
+    ];
+
+    const saved = localStorage.getItem("smei_module_pins");
+    if (saved) {
+      try {
+        let loaded = JSON.parse(saved);
+        // Ensure "Request For Supply (RFS) Approval" rule is present
+        const hasRfsApproval = loaded.some((r: any) => r.moduleName === "Request For Supply (RFS) Approval" || r.id === "rfs_approval_gate");
+        if (!hasRfsApproval) {
+          loaded.push({ id: "rfs_approval_gate", moduleName: "Request For Supply (RFS) Approval", actionName: "Access Request For Supply (RFS) Approval", pinCode: "7777", isEnabled: true });
+          localStorage.setItem("smei_module_pins", JSON.stringify(loaded));
+        }
+        setModulePins(loaded);
+      } catch (e) {
+        console.error("Failed to parse saved module pins", e);
+        setModulePins(defaultRules);
+        localStorage.setItem("smei_module_pins", JSON.stringify(defaultRules));
+      }
+    } else {
+      setModulePins(defaultRules);
+      localStorage.setItem("smei_module_pins", JSON.stringify(defaultRules));
+    }
+  }, []);
+
+  const saveModulePins = (updatedRules: PinProtectionRule[]) => {
+    setModulePins(updatedRules);
+    localStorage.setItem("smei_module_pins", JSON.stringify(updatedRules));
+  };
+
+  const handleAddPinRule = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPinCode.trim()) {
+      setError("Please enter a security PIN code.");
+      return;
+    }
+
+    const newRule: PinProtectionRule = {
+      id: "rule_" + Date.now(),
+      moduleName: newPinModuleName,
+      actionName: `Access ${newPinModuleName}`,
+      pinCode: newPinCode.trim(),
+      isEnabled: true,
+    };
+
+    const updated = [...modulePins, newRule];
+    saveModulePins(updated);
+    setNewPinCode("");
+    setShowAddPinRule(false);
+    setSuccess(`Security PIN rule for ${newPinModuleName} added successfully!`);
+    setTimeout(() => setSuccess(""), 4000);
+  };
+
+  const handleDeletePinRule = (id: string) => {
+    if (confirm("Are you sure you want to delete this PIN protection rule?")) {
+      const updated = modulePins.filter((rule) => rule.id !== id);
+      saveModulePins(updated);
+      setSuccess("Security PIN rule deleted successfully.");
+      setTimeout(() => setSuccess(""), 4000);
+    }
+  };
+
+  const handleTogglePinRule = (id: string) => {
+    const updated = modulePins.map((rule) => {
+      if (rule.id === id) {
+        return { ...rule, isEnabled: !rule.isEnabled };
+      }
+      return rule;
+    });
+    saveModulePins(updated);
+  };
+
+  const handleUpdatePinCode = (id: string, newCode: string) => {
+    const updated = modulePins.map((rule) => {
+      if (rule.id === id) {
+        return { ...rule, pinCode: newCode };
+      }
+      return rule;
+    });
+    saveModulePins(updated);
+  };
+
   const AVAILABLE_PERMISSIONS = [
     { key: "view_dashboard", label: "View Dashboard", desc: "Access the role-customized KPI summary counters" },
     { key: "view_all_pos", label: "View All POs", desc: "View all purchase orders in the entire system" },
@@ -122,7 +351,7 @@ export default function RoleManagement() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h2 className="text-xl font-bold font-display text-gray-800 uppercase tracking-wide">
-            Access Role & Privilege Matrix
+            SECURITY
           </h2>
           <p className="text-sm text-gray-500">
             Configure fine-grained system permissions and security profiles across corporate levels.
@@ -317,6 +546,373 @@ export default function RoleManagement() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Enterprise Control Portal Security PIN Protection Container */}
+      <div id="enterprise-portal-pin-section" className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden mt-8">
+        <div className="bg-gray-50/70 p-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div>
+            <h3 className="font-bold text-gray-800 font-display text-base tracking-wide uppercase flex items-center gap-2">
+              <span className="w-2.5 h-2.5 bg-amber-500 rounded-full animate-pulse" />
+              Enterprise Control Portal Security PIN Protection
+            </h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Enforce a secure, independent PIN gate challenge when users select portals (POMS / TSD) from the main selector.
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className={`text-xs font-bold uppercase ${isPortalPinEnabled ? "text-amber-600 dark:text-amber-400" : "text-gray-400 dark:text-gray-500"}`}>
+              {isPortalPinEnabled ? "Enforced" : "Disabled"}
+            </span>
+            <label className="relative inline-flex items-center cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={isPortalPinEnabled}
+                onChange={handleTogglePortalPin}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-200 dark:bg-slate-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
+            </label>
+          </div>
+        </div>
+        <div className="p-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Purchase Order PIN Config */}
+            <div className="p-4 bg-gray-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl flex items-center justify-between">
+              <div>
+                <p className="text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Purchase Order (PO) PIN</p>
+                <p className="text-sm font-mono font-bold text-gray-800 dark:text-gray-200 mt-1">•••• (Configured)</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingPinType("po");
+                  setTempNewPin("");
+                  setTempConfirmPin("");
+                  setPinEditError("");
+                }}
+                className="px-3.5 py-1.5 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-bold shadow-xs transition-all active:scale-95 cursor-pointer"
+              >
+                Change PIN
+              </button>
+            </div>
+
+            {/* TSD Compliance PIN Config */}
+            <div className="p-4 bg-gray-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl flex items-center justify-between">
+              <div>
+                <p className="text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">TSD Compliance PIN</p>
+                <p className="text-sm font-mono font-bold text-gray-800 dark:text-gray-200 mt-1">•••• (Configured)</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingPinType("tsd");
+                  setTempNewPin("");
+                  setTempConfirmPin("");
+                  setPinEditError("");
+                }}
+                className="px-3.5 py-1.5 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-bold shadow-xs transition-all active:scale-95 cursor-pointer"
+              >
+                Change PIN
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Module Security PIN Protection Container */}
+      <div id="module-pin-protection-section" className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden mt-8">
+        <div className="bg-gray-50/70 p-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div>
+            <h3 className="font-bold text-gray-800 font-display text-base tracking-wide uppercase flex items-center gap-2">
+              <span className="w-2.5 h-2.5 bg-red-600 rounded-full animate-pulse" />
+              Module Security PIN Protection
+            </h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Set, update, or add administrative PIN authorization bounds for secure actions in different modules.
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              const activePortal = localStorage.getItem("smei_active_system") || "po";
+              setNewPinModuleName(activePortal === "tsd" ? "Control No" : "Purchase Order");
+              setShowAddPinRule(true);
+            }}
+            className="px-3.5 py-1.5 bg-gray-800 hover:bg-gray-900 text-white rounded-lg shadow font-semibold text-xs transition-all active:scale-[0.98]"
+          >
+            + Add PIN Rule
+          </button>
+        </div>
+
+        {/* PIN rules list */}
+        <div className="p-6">
+          {/* Module Security PIN Protection Master Override Toggle */}
+          <div className="p-4 bg-gray-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl flex items-center justify-between mb-6">
+            <div>
+              <h4 className="font-bold text-gray-800 dark:text-gray-100 text-sm">Module PIN Protection Master Override</h4>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 leading-relaxed">
+                Enable or disable administrative PIN gate protection globally for all configured system modules.
+              </p>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className={`text-xs font-bold uppercase ${isGlobalPinEnabled ? "text-red-600 dark:text-red-400" : "text-gray-400 dark:text-gray-500"}`}>
+                {isGlobalPinEnabled ? "Enforced" : "Disabled"}
+              </span>
+              <label className="relative inline-flex items-center cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={isGlobalPinEnabled}
+                  onChange={handleToggleGlobalPin}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-200 dark:bg-slate-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
+              </label>
+            </div>
+          </div>
+
+          {modulePins.length === 0 ? (
+            <div className="text-center py-8 border-2 border-dashed border-gray-100 rounded-xl">
+              <p className="text-sm text-gray-400">No custom module PIN protection bounds defined.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-gray-200 text-gray-400 uppercase tracking-wider text-[10px] font-bold">
+                    <th className="py-3 px-4">Module</th>
+                    <th className="py-3 px-4">Protected Action</th>
+                    <th className="py-3 px-4">Access PIN Code</th>
+                    <th className="py-3 px-4">Requirement State</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 font-medium">
+                  {modulePins.map((rule) => (
+                    <tr key={rule.id} className="hover:bg-gray-50/40 transition-colors">
+                      <td className="py-3.5 px-4">
+                        <span className="px-2 py-0.5 bg-red-50 text-smei-crimson text-[10px] rounded font-bold uppercase">
+                          {rule.moduleName}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-gray-700">{rule.actionName}</td>
+                      <td className="py-3.5 px-4">
+                        <div className="flex items-center gap-2">
+                          <span className="bg-gray-100 dark:bg-slate-800 px-2.5 py-1 rounded font-mono font-bold text-gray-800 dark:text-gray-200">
+                            {rule.pinCode}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingPinType("module");
+                              setEditingModuleRuleId(rule.id);
+                              setTempNewPin("");
+                              setTempConfirmPin("");
+                              setPinEditError("");
+                            }}
+                            className="text-[10px] font-bold uppercase tracking-wider text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300 underline cursor-pointer"
+                          >
+                            Change
+                          </button>
+                        </div>
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <label className="relative inline-flex items-center cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={rule.isEnabled}
+                            onChange={() => handleTogglePinRule(rule.id)}
+                            className="sr-only peer"
+                          />
+                          <div className="w-8 h-4 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-red-600"></div>
+                          <span className="ml-2 text-[10px] uppercase font-bold text-gray-500">
+                            {rule.isEnabled ? "Enforced" : "Bypassed"}
+                          </span>
+                        </label>
+                      </td>
+                      <td className="py-3.5 px-4 text-right">
+                        {rule.id !== "po_status_change" && rule.id !== "rfs_approval" && rule.id !== "rfs_approval_gate" && rule.id !== "canvass_access" && rule.id !== "pis_access" ? (
+                          <button
+                            onClick={() => handleDeletePinRule(rule.id)}
+                            className="text-gray-400 hover:text-red-600 transition-colors"
+                            title="Delete Rule"
+                          >
+                            ✕
+                          </button>
+                        ) : (
+                          <span className="text-[10px] text-gray-300 font-bold uppercase select-none">System Default</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Add Pin Protection Rule Modal */}
+      {showAddPinRule && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-xl border border-gray-100 max-w-md w-full overflow-hidden animate-scaleIn">
+            <div className="p-6 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+              <h3 className="font-bold text-gray-800 font-display text-base tracking-wide uppercase">
+                Add Dynamic Security PIN Rule
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAddPinRule(false);
+                  setNewPinCode("");
+                }}
+                className="text-gray-400 hover:text-gray-600 font-bold transition-all text-sm px-2 py-1"
+              >
+                ✕
+              </button>
+            </div>
+            <form onSubmit={handleAddPinRule}>
+              <div className="p-6 space-y-4">
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider">
+                    Select Target Module
+                  </label>
+                  <select
+                    value={newPinModuleName}
+                    onChange={(e) => setNewPinModuleName(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 text-sm font-semibold"
+                  >
+                    {(localStorage.getItem("smei_active_system") || "po") === "tsd" ? (
+                      <>
+                        <option value="Control No">Control No.</option>
+                        <option value="Unloading/Loading">Unloading/Loading</option>
+                        <option value="Hazardous Waste">Hazardous Waste</option>
+                        <option value="Waste Movement">Waste Movement</option>
+                        <option value="Timestamp">Timestamp</option>
+                        <option value="Manifest Summary">Manifest Summary</option>
+                        <option value="TSD Summary">TSD Summary Monitoring</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="Purchase Order">Purchase Order (PO)</option>
+                        <option value="Request For Supply">Request For Supply (RFS)</option>
+                        <option value="Request For Supply (RFS) Approval">Request For Supply (RFS) Approval</option>
+                        <option value="Payment Instruction Slip">Payment Instruction Slip (PIS)</option>
+                        <option value="Canvass Sheet">Canvass Sheet (Canvass)</option>
+                      </>
+                    )}
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider">
+                    Administrative PIN Code
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newPinCode}
+                    onChange={(e) => setNewPinCode(e.target.value)}
+                    placeholder="e.g. 1122"
+                    className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 text-sm font-semibold font-mono"
+                  />
+                </div>
+              </div>
+              <div className="p-6 border-t border-gray-100 bg-gray-50 flex items-center justify-end gap-3 text-xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddPinRule(false);
+                    setNewPinCode("");
+                  }}
+                  className="px-4 py-2 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-100 transition-all font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-gradient-to-r from-red-700 to-red-600 hover:from-red-800 hover:to-red-700 text-white rounded-lg shadow font-semibold"
+                >
+                  Enable PIN Rule
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Secure PIN Confirmation / Edit Modal Container */}
+      {editingPinType && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white dark:bg-slate-900 border border-neutral-200 dark:border-slate-800 rounded-2xl shadow-xl max-w-sm w-full overflow-hidden animate-scaleIn">
+            <div className="p-5 border-b border-neutral-100 dark:border-slate-800/80 bg-neutral-50 dark:bg-slate-950/40 flex items-center justify-between">
+              <h3 className="font-bold text-neutral-800 dark:text-neutral-200 text-sm tracking-wide uppercase">
+                {editingPinType === "po" && "Change PO Portal PIN"}
+                {editingPinType === "tsd" && "Change TSD Portal PIN"}
+                {editingPinType === "module" && "Change Module PIN"}
+              </h3>
+              <button
+                type="button"
+                onClick={closePinEditor}
+                className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 font-bold transition-all text-xs"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-4">
+              {pinEditError && (
+                <div className="p-3 bg-red-50 dark:bg-red-950/30 text-rose-600 dark:text-rose-400 border border-red-200 dark:border-red-900/30 rounded-xl text-xs font-semibold">
+                  {pinEditError}
+                </div>
+              )}
+              
+              <div className="space-y-1.5">
+                <label className="block text-[10px] font-bold text-neutral-500 dark:text-slate-400 uppercase tracking-wider">
+                  New PIN Code
+                </label>
+                <input
+                  type="password"
+                  value={tempNewPin}
+                  onChange={(e) => setTempNewPin(e.target.value.replace(/\D/g, ""))}
+                  placeholder="Enter numeric PIN"
+                  maxLength={6}
+                  className="w-full px-3.5 py-2 border border-neutral-200 dark:border-slate-800 bg-neutral-50 dark:bg-slate-950 text-neutral-800 dark:text-neutral-200 rounded-xl font-mono text-center text-lg font-bold tracking-widest focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-[10px] font-bold text-neutral-500 dark:text-slate-400 uppercase tracking-wider">
+                  Confirm New PIN Code
+                </label>
+                <input
+                  type="password"
+                  value={tempConfirmPin}
+                  onChange={(e) => setTempConfirmPin(e.target.value.replace(/\D/g, ""))}
+                  placeholder="Re-enter numeric PIN"
+                  maxLength={6}
+                  className="w-full px-3.5 py-2 border border-neutral-200 dark:border-slate-800 bg-neutral-50 dark:bg-slate-950 text-neutral-800 dark:text-neutral-200 rounded-xl font-mono text-center text-lg font-bold tracking-widest focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+            </div>
+
+            <div className="p-5 border-t border-neutral-100 dark:border-slate-800/80 bg-neutral-50 dark:bg-slate-950/40 flex justify-end gap-3 text-xs">
+              <button
+                type="button"
+                onClick={closePinEditor}
+                className="px-4 py-2 border border-neutral-200 dark:border-slate-800 rounded-xl text-neutral-600 dark:text-slate-300 hover:bg-neutral-100 dark:hover:bg-slate-800 transition-all font-bold"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveEditedPin}
+                className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-xl shadow-md font-bold transition-all"
+              >
+                Confirm Change
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

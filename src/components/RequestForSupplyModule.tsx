@@ -8,9 +8,8 @@ import { RequestForSupply, RFSItem, User, UserRole } from "../types";
 import { api } from "../lib/api";
 import { Search, Plus, Filter, Calendar, FileText, ArrowUpDown, Trash2, Edit3, Eye, FileSpreadsheet, X, Download, Trash } from "lucide-react";
 import { exportWordWithTemplate, exportExcelWithTemplate } from "../utils/templateExport";
-import { ExportExcelButton, CreateButton } from "./SharedButtons";
+import { ExportExcelButton, CreateButton, ExportPdfButton } from "./SharedButtons";
 import { TableSkeleton } from "./ui/Skeleton";
-import DocumentPreview from "./DocumentPreview";
 import { formatRFSNo } from "../utils/templateMapping";
 
 interface RFSModuleProps {
@@ -70,8 +69,13 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
         setActiveRfsId(data[data.length - 1].id);
         setSelectedRFS(data[data.length - 1]);
       }
-    } catch (err) {
-      console.error("Error fetching RFS:", err);
+    } catch (err: any) {
+      const errMsg = err?.message || String(err);
+      if (errMsg.includes("Session expired") || errMsg.includes("unauthorized") || errMsg.includes("token")) {
+        console.warn("RFS fetch unauthorized or session expired (handled globally):", errMsg);
+      } else {
+        console.error("Error fetching RFS:", errMsg);
+      }
     } finally {
       setLoading(false);
     }
@@ -381,7 +385,7 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
       APPROVED_BY: req.approvedBy || "N/A",
     };
 
-    const exportItems = req.items.map((it, index) => ({
+    const exportItems = (req.items || []).map((it, index) => ({
       index: index + 1,
       quantity: it.quantity,
       unit: it.unit,
@@ -397,9 +401,9 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
 
     if (format === "word") {
       // Pass data to Docxtemplater containing loop array "items"
-      await exportWordWithTemplate("RFS_TEMPLATE.docx", { ...exportData, items: exportItems }, `${formattedRFS}_SMEI_RFS.docx`);
+      await exportWordWithTemplate("RFS_TEMPLATE_WORD.docx", { ...exportData, items: exportItems }, `${formattedRFS}_SMEI_RFS.docx`);
     } else {
-      await exportExcelWithTemplate("RFS_TEMPLATE.xlsx", exportData, "items", exportItems, `${formattedRFS}_SMEI_RFS.xlsx`);
+      await exportExcelWithTemplate("RFS_TEMPLATE.xlsm", exportData, "items", exportItems, `${formattedRFS}_SMEI_RFS.xlsm`);
     }
   };
 
@@ -418,92 +422,46 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
   };
 
 const handleExportExcel = async () => {
-
     if (!selectedRFS) {
         alert("Please select one Request for Supply first.");
         return;
     }
-
     await handleExport(selectedRFS, "excel");
-
 };
 
+  const handleTriggerPDFExport = async () => {
+    if (selectedRFS) {
+      try {
+        const { printDocument } = await import("../utils/printDocument");
+        await printDocument("rfs", selectedRFS);
+      } catch (err: any) {
+        alert("Failed to print: " + (err.message || err));
+      }
+    } else {
+      alert("Please select an RFS first.");
+    }
+  };
+
   return (
-    <div id="smei-rfs-list" className="p-6 md:p-10 space-y-6 max-w-[130rem] mx-auto w-full">
+    <div id="smei-rfs-list" className="p-4 md:p-6 space-y-4 max-w-[130rem] mx-auto w-full">
       {/* Upper Action Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800 tracking-tight font-display">Requests for Supply [RFS]</h2>
-          <p className="text-sm text-gray-500 mt-0.5">Manage departmental purchasing requests and supply deliveries</p>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col" id="rfs-module-root">
-      {/* Search and Filters Header */}
-      <div className="p-6 border-b border-gray-100 bg-gray-50/50 flex flex-col gap-4">
-        <div className="relative w-full md:w-96">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search RFS, Control No, Purpose..."
-            className="pl-9 pr-4 py-2 w-full text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-smei-crimson focus:border-transparent outline-none transition-all"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+          <h2 className="text-xl md:text-2xl font-bold text-gray-800 tracking-tight font-display">Requests for Supply [RFS]</h2>
+          <p className="text-xs md:text-sm text-gray-500 mt-0.5">Manage departmental purchasing requests and supply deliveries</p>
         </div>
 
-        {/* Filter controls and Actions */}
-        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-          <div className="flex flex-wrap gap-2">
-            <div className="w-[180px]">
-              <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Status Filter</label>
-              <select
-                className="w-full text-xs border border-gray-200 rounded-md p-1.5 outline-none bg-white focus:border-smei-crimson"
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-              >
-                <option value="All">All Statuses</option>
-                <option value="Incomplete">Incomplete</option>
-                <option value="Complete">Complete</option>
-                <option value="On Time">On Time</option>
-                <option value="Late">Late</option>
-              </select>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4 w-full md:w-auto md:justify-end">
+          {selectedRFS && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-gray-500 uppercase font-mono tracking-wider">Selected:</span>
+              <span className="text-[11px] font-bold font-mono text-smei-crimson bg-red-50 border border-red-200 px-2.5 py-1 rounded-md">
+                {formatRFSNo(selectedRFS.rfsNumber, selectedRFS.dateRequested)}
+              </span>
             </div>
+          )}
 
-            <div className="w-[180px]">
-              <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Department</label>
-              <select
-                className="w-full text-xs border border-gray-200 rounded-md p-1.5 outline-none bg-white focus:border-smei-crimson"
-                value={departmentFilter}
-                onChange={(e) => setDepartmentFilter(e.target.value)}
-              >
-                <option value="All">All Departments</option>
-                <option value="Admin">Admin</option>
-                <option value="Technical">Technical</option>
-                <option value="Accounting">Accounting</option>
-                <option value="OM Sales">OM Sales</option>
-                <option value="Sales">Sales</option>
-                <option value="Others">Others</option>
-              </select>
-            </div>
-
-            <div className="w-[180px]">
-              <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Request Mode</label>
-              <select
-                className="w-full text-xs border border-gray-200 rounded-md p-1.5 outline-none bg-white focus:border-smei-crimson"
-                value={modeFilter}
-                onChange={(e) => setModeFilter(e.target.value)}
-              >
-                <option value="All">All Modes</option>
-                <option value="Emergency">Emergency</option>
-                <option value="Urgent">Urgent</option>
-                <option value="Regular">Regular</option>
-                <option value="Irregular">Irregular</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-end gap-2 w-full md:w-auto ml-auto">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
             {isAuthorized && (
               <CreateButton onClick={() => handleOpenModal(null)} label="Create RFS" />
             )}
@@ -511,509 +469,561 @@ const handleExportExcel = async () => {
         </div>
       </div>
 
-      {/* Split Layout for RFS Grid and Live Preview */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start p-6">
-        {/* Left Column: RFS Table (Expanded to 58.33% / col-span-7 for enterprise screens) */}
-        <div className="lg:col-span-7 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[calc(100vh-280px)] min-h-[500px]">
-          <div className="overflow-x-auto flex-1 overflow-y-auto">
-            <table className="w-full text-left border-collapse min-w-[500px]">
-          <thead className="sticky top-0 bg-white z-10 shadow-sm">
-            <tr className="bg-red-50/20 text-gray-600 border-b border-gray-100 text-[11px] font-bold uppercase tracking-wider">
-              <th className="py-4 px-6">Control No.</th>
-              <th className="py-4 px-6">Department</th>
-              <th className="py-4 px-6">Date Requested</th>
-              <th className="py-4 px-6">Due Date</th>
-              <th className="py-4 px-6">Mode</th>
-              <th className="py-4 px-6">Status</th>
-              <th className="py-4 px-6 text-center">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <TableSkeleton rows={5} columns={8} />
-            ) : paginatedRequests.length === 0 ? (
-              <tr>
-                <td colSpan={8} className="py-12 text-center text-gray-400">
-                  No Requests for Supply found matching filters.
-                </td>
-              </tr>
-            ) : (
-              filteredRequests.map((req, idx) => (
-                <tr
-                  key={req.id}
-                  onClick={() => {
-                    setActiveRfsId(req.id);
-                    setSelectedRFS(req);
-                  }}
-                  onDoubleClick={() => handleOpenModal(req, false)}
-                  className={`cursor-pointer transition-all border-b border-gray-50/60 group ${
-                    selectedRFS?.id === req.id
-                      ? "bg-red-600/20 border-l-4 border-l-smei-crimson font-medium"
-                      : idx % 2 === 1
-                      ? "bg-gray-50/30 hover:bg-red-600/10"
-                      : "bg-white hover:bg-red-600/10"
-                  }`}
-                  title="Double-click to View details"
-                >
-                  <td className="py-3 px-6 font-mono font-bold text-smei-darkred">
-                    <div className="flex items-center gap-2">
-                      {selectedRFS?.id === req.id && (
-                        <div className="w-1.5 h-1.5 bg-smei-crimson rounded-full animate-pulse shrink-0" />
-                      )}
-                      <span>{formatRFSNo(req.rfsNumber, req.dateRequested)}</span>
-                    </div>
-                  </td>
-                  <td className="py-3 px-6 text-gray-700 font-semibold text-xs">
-                    {req.department === "Others" ? req.departmentOthers : req.department}
-                  </td>
-                  <td className="py-3 px-6 text-gray-500 font-mono">{req.dateRequested}</td>
-                  <td className="py-3 px-6 text-gray-500 font-mono">{req.dueDate}</td>
-                  <td className="py-3 px-6">
-                    <span className={`inline-flex px-2 py-0.5 rounded text-[10px] border ${modeColors[req.modeOfRequest] || "bg-gray-100"}`}>
-                      {req.modeOfRequest}
-                    </span>
-                  </td>
-                  <td className="py-3 px-6">
-                    <span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-bold border ${statusColors[req.status] || "bg-gray-100"}`}>
-                      {req.status}
-                    </span>
-                  </td>
-                  <td className="py-3 px-6 text-center" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
-                    <div className="flex items-center justify-center gap-1.5">
-                      <button
-                        onClick={() => handleOpenModal(req, false)}
-                        className="p-1 hover:bg-red-50 hover:text-smei-crimson text-gray-400 rounded transition-all"
-                        title="View details"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
-
-                      {isAuthorized && (
-                        <button
-                          onClick={() => handleOpenModal(req, true)}
-                          className="p-1 hover:bg-blue-50 hover:text-blue-600 text-gray-400 rounded transition-all"
-                          title="Edit RFS"
-                        >
-                          <Edit3 className="w-4 h-4" />
-                        </button>
-                      )}
-
-
-
-                      {isAuthorized && (
-                        <button
-                          onClick={() => handleDelete(req.id, formatRFSNo(req.rfsNumber, req.dateRequested))}
-                          className="p-1 hover:bg-rose-50 hover:text-rose-600 text-gray-400 rounded transition-all"
-                          title="Delete RFS"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Right Column: Live Document Preview (Set to 41.67% / col-span-5 to balance layout) */}
-        <div className="lg:col-span-5 h-[calc(100vh-280px)] min-h-[500px] sticky top-6">
-          {selectedRFS ? (
-            <DocumentPreview
-              moduleName="rfs"
-              format="excel"
-              data={selectedRFS}
-            />
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full bg-slate-50 border border-slate-200 border-dashed rounded-xl p-8 text-slate-400">
-              <FileText className="w-12 h-12 text-slate-300 mb-2 animate-pulse" />
-              <p className="text-sm font-medium">Select an RFS document to display live preview</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* RFS View/Create/Edit Modal Dialog */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 flex items-center justify-center p-4 backdrop-blur-xs">
-          <div className="bg-white rounded-xl shadow-xl border border-gray-100 w-full max-w-7xl overflow-hidden transition-all scale-100">
-            <div className="bg-smei-crimson text-white px-6 py-4 flex items-center justify-between">
-              <div>
-                <h3 className="text-base font-bold uppercase tracking-wide">
-                  {selectedRequest ? (isEditMode ? "Edit Request for Supply" : "Request for Supply Details") : "Create New Request for Supply"}
-                </h3>
-                <p className="text-[10px] text-red-100 font-medium">SMEI Departmental Purchasing Requests</p>
+      {/* Full Width Layout for RFS */}
+      <div className="w-full">
+        {/* Main Column: Filters + Table (List Mode) OR Form Editor (Form Mode) */}
+        <div className="w-full flex flex-col gap-4 h-[calc(100vh-170px)] min-h-[650px]">
+          {isModalOpen ? (
+            /* Embedded High-Fidelity Form Editor (Identical to PO design style) */
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col h-full">
+              {/* Form Header */}
+              <div className="bg-smei-crimson text-white px-6 py-3 flex items-center justify-between shrink-0">
+                <div>
+                  <h3 className="text-sm font-bold uppercase tracking-wide">
+                    {selectedRequest ? (isEditMode ? "Edit Request for Supply" : "Request for Supply Details") : "Create New Request for Supply"}
+                  </h3>
+                  <p className="text-[10px] text-red-100 font-medium">SMEI Departmental Purchasing Requests</p>
+                </div>
+                <button onClick={handleCloseModal} className="text-white hover:text-red-200 p-1 rounded hover:bg-white/10 transition-colors">
+                  <X className="w-4 h-4" />
+                </button>
               </div>
-              <button onClick={handleCloseModal} className="text-white hover:text-red-200">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 max-h-[80vh] overflow-y-auto">
-              {/* Left Column: Form Editor */}
-              <div className="lg:col-span-6">
+              {/* Form Content (Scrollable) */}
+              <div className="p-6 overflow-y-auto flex-1">
                 <form onSubmit={handleSubmit} className="space-y-4">
-              {errors.server && (
-                <div className="bg-rose-50 border-l-4 border-rose-500 text-rose-700 text-xs p-3 rounded-md font-medium">
-                  {errors.server}
-                </div>
-              )}
+                  {errors.server && (
+                    <div className="bg-rose-50 border-l-4 border-rose-500 text-rose-700 text-xs p-3 rounded-md font-medium">
+                      {errors.server}
+                    </div>
+                  )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Control Number */}
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">Control No.: *</label>
-                  <input
-                    type="text"
-                    required
-                    disabled={!isEditMode}
-                    className={`w-full text-sm font-mono font-semibold p-2 border rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none ${
-                      errors.rfsNumber ? "border-rose-500 bg-rose-50/20" : "border-gray-200 bg-gray-50"
-                    }`}
-                    value={rfsNumber}
-                    onChange={(e) => setRfsNumber(e.target.value)}
-                    placeholder="YYYY-MM-###"
-                  />
-                  {errors.rfsNumber && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.rfsNumber}</p>}
-                </div>
-
-                {/* Purchase Order Number */}
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">Associated PO Number (Optional):</label>
-                  <input
-                    type="text"
-                    disabled={!isEditMode}
-                    placeholder="e.g. PO-26-005"
-                    className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson font-mono"
-                    value={purchaseOrderNumber}
-                    onChange={(e) => setPurchaseOrderNumber(e.target.value)}
-                  />
-                </div>
-
-                {/* Department Selection */}
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">Requesting Department:</label>
-                  <div className="flex gap-2">
-                    <select
-                      disabled={!isEditMode}
-                      className="w-1/2 text-sm p-2 border border-gray-200 rounded-lg bg-white outline-none focus:ring-1 focus:ring-smei-crimson"
-                      value={department}
-                      onChange={(e) => setDepartment(e.target.value)}
-                    >
-                      <option value="Admin">Admin</option>
-                      <option value="Technical">Technical</option>
-                      <option value="Accounting">Accounting</option>
-                      <option value="OM Sales">OM Sales</option>
-                      <option value="Sales">Sales</option>
-                      <option value="Others">Others</option>
-                    </select>
-                    {department === "Others" && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Control Number */}
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">Control No.: *</label>
                       <input
                         type="text"
                         required
                         disabled={!isEditMode}
-                        placeholder="Specify"
-                        className="w-1/2 text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson"
-                        value={departmentOthers}
-                        onChange={(e) => setDepartmentOthers(e.target.value)}
+                        className={`w-full text-sm font-mono font-semibold p-2 border rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none ${
+                          errors.rfsNumber ? "border-rose-500 bg-rose-50/20" : "border-gray-200 bg-gray-50"
+                        }`}
+                        value={rfsNumber}
+                        onChange={(e) => setRfsNumber(e.target.value)}
+                        placeholder="YYYY-MM-###"
                       />
+                      {errors.rfsNumber && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.rfsNumber}</p>}
+                    </div>
+
+                    {/* Purchase Order Number */}
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">Associated PO Number (Optional):</label>
+                      <input
+                        type="text"
+                        disabled={!isEditMode}
+                        placeholder="e.g. PO-26-005"
+                        className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson font-mono"
+                        value={purchaseOrderNumber}
+                        onChange={(e) => setPurchaseOrderNumber(e.target.value)}
+                      />
+                    </div>
+
+                    {/* Department Selection */}
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">Requesting Department:</label>
+                      <div className="flex gap-2">
+                        <select
+                          disabled={!isEditMode}
+                          className="w-1/2 text-sm p-2 border border-gray-200 rounded-lg bg-white outline-none focus:ring-1 focus:ring-smei-crimson"
+                          value={department}
+                          onChange={(e) => setDepartment(e.target.value)}
+                        >
+                          <option value="Admin">Admin</option>
+                          <option value="Technical">Technical</option>
+                          <option value="Accounting">Accounting</option>
+                          <option value="OM Sales">OM Sales</option>
+                          <option value="Sales">Sales</option>
+                          <option value="Others">Others</option>
+                        </select>
+                        {department === "Others" && (
+                          <input
+                            type="text"
+                            required
+                            disabled={!isEditMode}
+                            placeholder="Specify"
+                            className="w-1/2 text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson"
+                            value={departmentOthers}
+                            onChange={(e) => setDepartmentOthers(e.target.value)}
+                          />
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Mode of Request */}
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">Mode of Request: *</label>
+                      <select
+                        disabled={!isEditMode}
+                        className="w-full text-sm p-2 border border-gray-200 rounded-lg bg-white outline-none focus:ring-1 focus:ring-smei-crimson"
+                        value={modeOfRequest}
+                        onChange={(e: any) => setModeOfRequest(e.target.value)}
+                      >
+                        <option value="Regular">REGULAR/ROUTINE (5-7 days)</option>
+                        <option value="Emergency">EMERGENCY (1-2 days)</option>
+                        <option value="Urgent">URGENT (4-5 days)</option>
+                        <option value="Irregular">IRREGULAR (7-10 days)</option>
+                      </select>
+                    </div>
+
+                    {/* Date Requested */}
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">Date Requested: *</label>
+                      <input
+                        type="date"
+                        required
+                        disabled={!isEditMode}
+                        className={`w-full text-sm p-2 border rounded-lg focus:ring-1 focus:ring-smei-crimson outline-none ${
+                          errors.dateRequested ? "border-rose-500 bg-rose-50/20" : "border-gray-200"
+                        }`}
+                        value={dateRequested}
+                        onChange={(e) => setDateRequested(e.target.value)}
+                      />
+                      {errors.dateRequested && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.dateRequested}</p>}
+                    </div>
+
+                    {/* Purpose - Full width row */}
+                    <div className="md:col-span-1">
+                      <label className="block text-xs font-bold text-gray-700 mb-1">Purpose: *</label>
+                      <input
+                        type="text"
+                        required
+                        disabled={!isEditMode}
+                        placeholder="Narrative explanation of request"
+                        className={`w-full text-sm p-2 border rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson ${
+                          errors.purpose ? "border-rose-500 bg-rose-50/20" : "border-gray-200"
+                        }`}
+                        value={purpose}
+                        onChange={(e) => setPurpose(e.target.value)}
+                      />
+                      {errors.purpose && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.purpose}</p>}
+                    </div>
+                  </div>
+
+                  {/* Items Table Grid */}
+                  <div className="border-t border-gray-100 pt-4 mt-2">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="text-xs font-bold text-smei-darkred uppercase tracking-wide">Supply Items List Grid</h4>
+                      {isEditMode && (
+                        <button
+                          type="button"
+                          onClick={handleAddItem}
+                          className="text-xs bg-red-50 hover:bg-red-100 text-smei-crimson border border-red-200 px-2.5 py-1 rounded font-semibold flex items-center gap-1"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Add Item Row</span>
+                        </button>
+                      )}
+                    </div>
+
+                    {errors.items && <p className="text-xs text-rose-500 mb-2 font-semibold bg-rose-50 p-2 border-l-4 border-rose-500 rounded">{errors.items}</p>}
+
+                    <div className="overflow-x-auto border border-gray-100 rounded-lg">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead>
+                          <tr className="bg-gray-100 text-gray-600 font-bold uppercase tracking-wider border-b border-gray-200 text-[10px]">
+                            <th className="py-2.5 px-3 w-16">Qty</th>
+                            <th className="py-2.5 px-3 w-20">Unit</th>
+                            <th className="py-2.5 px-3 w-48">Description *</th>
+                            <th className="py-2.5 px-3 w-32">Last Pur. Date</th>
+                            <th className="py-2.5 px-3 w-24">Last Qty</th>
+                            <th className="py-2.5 px-3 w-28">Last Purchase</th>
+                            <th className="py-2.5 px-3 w-32">Cur. Pur. Date</th>
+                            <th className="py-2.5 px-3 w-24">Current Qty</th>
+                            <th className="py-2.5 px-3 w-28">Current Price</th>
+                            <th className="py-2.5 px-3 w-36">Remarks</th>
+                            {isEditMode && <th className="py-2.5 px-3 text-center w-12">Act</th>}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {items.map((it, idx) => (
+                            <tr key={it.id || idx} className="border-b border-gray-100 hover:bg-gray-50/50">
+                              {/* Qty */}
+                              <td className="p-1">
+                                <input
+                                  type="number"
+                                  required
+                                  disabled={!isEditMode}
+                                  className="w-full border border-gray-200 p-1 rounded font-mono text-center focus:border-smei-crimson outline-none"
+                                  value={it.quantity === 0 ? "" : it.quantity}
+                                  onChange={(e) => handleItemChange(idx, "quantity", e.target.value === "" ? 0 : Number(e.target.value))}
+                                />
+                              </td>
+                              {/* Unit */}
+                              <td className="p-1">
+                                <input
+                                  type="text"
+                                  disabled={!isEditMode}
+                                  className="w-full border border-gray-200 p-1 rounded text-center focus:border-smei-crimson outline-none"
+                                  value={it.unit}
+                                  onChange={(e) => handleItemChange(idx, "unit", e.target.value)}
+                                />
+                              </td>
+                              {/* Description */}
+                              <td className="p-1">
+                                <input
+                                  type="text"
+                                  required
+                                  disabled={!isEditMode}
+                                  placeholder="Name/Specs of item"
+                                  className="w-full border border-gray-200 p-1 rounded focus:border-smei-crimson outline-none font-semibold text-gray-800"
+                                  value={it.description}
+                                  onChange={(e) => handleItemChange(idx, "description", e.target.value)}
+                                />
+                              </td>
+                              {/* Last Purchase Date */}
+                              <td className="p-1">
+                                <input
+                                  type="date"
+                                  disabled={!isEditMode}
+                                  className="w-full border border-gray-200 p-1 rounded font-mono focus:border-smei-crimson outline-none"
+                                  value={it.lastPurchaseDate}
+                                  onChange={(e) => handleItemChange(idx, "lastPurchaseDate", e.target.value)}
+                                />
+                              </td>
+                              {/* Last Purchase Qty */}
+                              <td className="p-1">
+                                <input
+                                  type="number"
+                                  disabled={!isEditMode}
+                                  className="w-full border border-gray-200 p-1 rounded font-mono focus:border-smei-crimson outline-none"
+                                  value={it.lastPurchaseQuantity === 0 ? "" : it.lastPurchaseQuantity}
+                                  onChange={(e) => handleItemChange(idx, "lastPurchaseQuantity", e.target.value === "" ? 0 : Number(e.target.value))}
+                                />
+                              </td>
+                              {/* Last Purchase Price */}
+                              <td className="p-1">
+                                <input
+                                  type="number"
+                                  step="any"
+                                  disabled={!isEditMode}
+                                  className="w-full border border-gray-200 p-1 rounded font-mono focus:border-smei-crimson outline-none"
+                                  value={it.lastPurchaseUnitPrice === 0 ? "" : it.lastPurchaseUnitPrice}
+                                  onChange={(e) => handleItemChange(idx, "lastPurchaseUnitPrice", e.target.value === "" ? 0 : Number(e.target.value))}
+                                />
+                              </td>
+                              {/* Current Purchase Date */}
+                              <td className="p-1">
+                                <input
+                                  type="date"
+                                  disabled={!isEditMode}
+                                  className="w-full border border-gray-200 p-1 rounded font-mono focus:border-smei-crimson outline-none"
+                                  value={it.currentPurchaseDate}
+                                  onChange={(e) => handleItemChange(idx, "currentPurchaseDate", e.target.value)}
+                                />
+                              </td>
+                              {/* Current Qty */}
+                              <td className="p-1">
+                                <input
+                                  type="number"
+                                  disabled={!isEditMode}
+                                  className="w-full border border-gray-200 p-1 rounded font-mono focus:border-smei-crimson outline-none"
+                                  value={it.currentPurchaseQuantity === 0 ? "" : it.currentPurchaseQuantity}
+                                  onChange={(e) => handleItemChange(idx, "currentPurchaseQuantity", e.target.value === "" ? 0 : Number(e.target.value))}
+                                />
+                              </td>
+                              {/* Current Purchase Price */}
+                              <td className="p-1">
+                                <input
+                                  type="number"
+                                  step="any"
+                                  disabled={!isEditMode}
+                                  className="w-full border border-gray-200 p-1 rounded font-mono focus:border-smei-crimson outline-none"
+                                  value={it.currentPurchaseUnitPrice === 0 ? "" : it.currentPurchaseUnitPrice}
+                                  onChange={(e) => handleItemChange(idx, "currentPurchaseUnitPrice", e.target.value === "" ? 0 : Number(e.target.value))}
+                                />
+                              </td>
+                              {/* Remarks */}
+                              <td className="p-1">
+                                <input
+                                  type="text"
+                                  disabled={!isEditMode}
+                                  placeholder="Notes"
+                                  className="w-full border border-gray-200 p-1 rounded focus:border-smei-crimson outline-none"
+                                  value={it.remarks}
+                                  onChange={(e) => handleItemChange(idx, "remarks", e.target.value)}
+                                />
+                              </td>
+                              {/* Action */}
+                              {isEditMode && (
+                                <td className="p-1 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveItem(idx)}
+                                    className="p-1 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded"
+                                  >
+                                    <Trash className="w-3.5 h-3.5" />
+                                  </button>
+                                </td>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Signatories Section */}
+                  <div className="border-t border-gray-100 pt-4 mt-2">
+                    <h4 className="text-xs font-bold text-smei-darkred uppercase tracking-wide mb-3">Workflow Signatories</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Requested By (Dept Head):</label>
+                        <input
+                          type="text"
+                          disabled={!isEditMode}
+                          className="w-full text-sm p-2 border border-gray-200 rounded-lg bg-gray-50/50"
+                          value={requestedBy}
+                          onChange={(e) => setRequestedBy(e.target.value)}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Verified By (Purchasing):</label>
+                        <input
+                          type="text"
+                          disabled={!isEditMode}
+                          className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson"
+                          value={verifiedBy}
+                          onChange={(e) => setVerifiedBy(e.target.value)}
+                          placeholder="Name of verifier"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Approved By (Director):</label>
+                        <input
+                          type="text"
+                          disabled={!isEditMode}
+                          className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson"
+                          value={approvedBy}
+                          onChange={(e) => setApprovedBy(e.target.value)}
+                          placeholder="Name of director"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Form Buttons */}
+                  <div className="flex items-center justify-end gap-2 border-t border-gray-100 pt-4 mt-6">
+                    <button
+                      type="button"
+                      onClick={handleCloseModal}
+                      className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-semibold text-gray-600 hover:bg-gray-50"
+                    >
+                      {isEditMode ? "Cancel" : "Close"}
+                    </button>
+                    {isEditMode && (
+                      <button
+                        type="submit"
+                        className="px-5 py-2 bg-smei-crimson hover:bg-smei-darkred text-white text-sm font-semibold rounded-lg shadow-xs"
+                      >
+                        Save Request
+                      </button>
                     )}
                   </div>
-                </div>
+                </form>
+              </div>
+            </div>
+          ) : (
+            /* Compressed Search and Filters Board + Table Container (List View) */
+            <>
+              {/* Compressed Search and Filters Board */}
+              <div className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+                  {/* Search Keywords */}
+                  <div className="space-y-0.5">
+                    <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Search Keywords</label>
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-gray-400" />
+                      <input
+                        type="text"
+                        placeholder="RFS#, purpose, items..."
+                        className="w-full pl-7.5 pr-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-sans focus:outline-none focus:ring-1 focus:ring-smei-crimson focus:border-transparent focus:bg-white transition-all text-gray-700"
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                      />
+                    </div>
+                  </div>
 
-                {/* Mode of Request */}
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">Mode of Request: *</label>
-                  <select
-                    disabled={!isEditMode}
-                    className="w-full text-sm p-2 border border-gray-200 rounded-lg bg-white outline-none focus:ring-1 focus:ring-smei-crimson"
-                    value={modeOfRequest}
-                    onChange={(e: any) => setModeOfRequest(e.target.value)}
-                  >
-                    <option value="Regular">REGULAR/ROUTINE (5-7 days)</option>
-                    <option value="Emergency">EMERGENCY (1-2 days)</option>
-                    <option value="Urgent">URGENT (4-5 days)</option>
-                    <option value="Irregular">IRREGULAR (7-10 days)</option>
-                  </select>
-                </div>
+                  {/* Status Filter */}
+                  <div className="space-y-0.5">
+                    <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Status</label>
+                    <div className="relative">
+                      <Filter className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-gray-400" />
+                      <select
+                        className="w-full pl-7.5 pr-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-sans focus:outline-none focus:ring-1 focus:ring-smei-crimson focus:border-transparent focus:bg-white transition-all text-gray-700"
+                        value={statusFilter}
+                        onChange={(e) => setStatusFilter(e.target.value)}
+                      >
+                        <option value="All">All Statuses</option>
+                        <option value="Incomplete">Incomplete</option>
+                        <option value="Complete">Complete</option>
+                        <option value="On Time">On Time</option>
+                        <option value="Late">Late</option>
+                      </select>
+                    </div>
+                  </div>
 
-                {/* Date Requested */}
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">Date Requested: *</label>
-                  <input
-                    type="date"
-                    required
-                    disabled={!isEditMode}
-                    className={`w-full text-sm p-2 border rounded-lg focus:ring-1 focus:ring-smei-crimson outline-none ${
-                      errors.dateRequested ? "border-rose-500 bg-rose-50/20" : "border-gray-200"
-                    }`}
-                    value={dateRequested}
-                    onChange={(e) => setDateRequested(e.target.value)}
-                  />
-                  {errors.dateRequested && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.dateRequested}</p>}
-                </div>
+                  {/* Department Filter */}
+                  <div className="space-y-0.5">
+                    <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Department</label>
+                    <div className="relative">
+                      <Filter className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-gray-400" />
+                      <select
+                        className="w-full pl-7.5 pr-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-sans focus:outline-none focus:ring-1 focus:ring-smei-crimson focus:border-transparent focus:bg-white transition-all text-gray-700"
+                        value={departmentFilter}
+                        onChange={(e) => setDepartmentFilter(e.target.value)}
+                      >
+                        <option value="All">All Departments</option>
+                        <option value="Admin">Admin</option>
+                        <option value="Technical">Technical</option>
+                        <option value="Accounting">Accounting</option>
+                        <option value="OM Sales">OM Sales</option>
+                        <option value="Sales">Sales</option>
+                        <option value="Others">Others</option>
+                      </select>
+                    </div>
+                  </div>
 
-                {/* Purpose - Full width row */}
-                <div className="md:col-span-3">
-                  <label className="block text-xs font-bold text-gray-700 mb-1">Purpose: *</label>
-                  <input
-                    type="text"
-                    required
-                    disabled={!isEditMode}
-                    placeholder="Narrative explanation of request"
-                    className={`w-full text-sm p-2 border rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson ${
-                      errors.purpose ? "border-rose-500 bg-rose-50/20" : "border-gray-200"
-                    }`}
-                    value={purpose}
-                    onChange={(e) => setPurpose(e.target.value)}
-                  />
-                  {errors.purpose && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.purpose}</p>}
+                  {/* Request Mode Filter */}
+                  <div className="space-y-0.5">
+                    <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Request Mode</label>
+                    <div className="relative">
+                      <Filter className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-gray-400" />
+                      <select
+                        className="w-full pl-7.5 pr-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-sans focus:outline-none focus:ring-1 focus:ring-smei-crimson focus:border-transparent focus:bg-white transition-all text-gray-700"
+                        value={modeFilter}
+                        onChange={(e) => setModeFilter(e.target.value)}
+                      >
+                        <option value="All">All Modes</option>
+                        <option value="Emergency">Emergency</option>
+                        <option value="Urgent">Urgent</option>
+                        <option value="Regular">Regular</option>
+                        <option value="Irregular">Irregular</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              {/* Items Table Grid */}
-              <div className="border-t border-gray-100 pt-4 mt-2">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-xs font-bold text-smei-darkred uppercase tracking-wide">Supply Items List Grid</h4>
-                  {isEditMode && (
-                    <button
-                      type="button"
-                      onClick={handleAddItem}
-                      className="text-xs bg-red-50 hover:bg-red-100 text-smei-crimson border border-red-200 px-2.5 py-1 rounded font-semibold flex items-center gap-1"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Add Item Row</span>
-                    </button>
-                  )}
-                </div>
-
-                {errors.items && <p className="text-xs text-rose-500 mb-2 font-semibold bg-rose-50 p-2 border-l-4 border-rose-500 rounded">{errors.items}</p>}
-
-                <div className="overflow-x-auto border border-gray-100 rounded-lg">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="bg-gray-100 text-gray-600 font-bold uppercase tracking-wider border-b border-gray-200 text-[10px]">
-                        <th className="py-2.5 px-3 w-16">Qty</th>
-                        <th className="py-2.5 px-3 w-20">Unit</th>
-                        <th className="py-2.5 px-3 w-48">Description *</th>
-                        <th className="py-2.5 px-3 w-32">Last Pur. Date</th>
-                        <th className="py-2.5 px-3 w-24">Last Qty</th>
-                        <th className="py-2.5 px-3 w-28">Last Purchase</th>
-                        <th className="py-2.5 px-3 w-32">Cur. Pur. Date</th>
-                        <th className="py-2.5 px-3 w-24">Current Qty</th>
-                        <th className="py-2.5 px-3 w-28">Current Price</th>
-                        <th className="py-2.5 px-3 w-36">Remarks</th>
-                        {isEditMode && <th className="py-2.5 px-3 text-center w-12">Act</th>}
+              {/* Table Container */}
+              <div className="flex-1 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
+                <div className="overflow-x-auto flex-1 overflow-y-auto">
+                  <table className="w-full text-left border-collapse min-w-[500px]">
+                    <thead className="sticky top-0 bg-white z-10 shadow-sm">
+                      <tr className="bg-red-50/20 text-gray-600 border-b border-gray-100 text-[11px] font-bold uppercase tracking-wider">
+                        <th className="py-4 px-6">Control No.</th>
+                        <th className="py-4 px-6">Department</th>
+                        <th className="py-4 px-6">Date Requested</th>
+                        <th className="py-4 px-6">Due Date</th>
+                        <th className="py-4 px-6">Mode</th>
+                        <th className="py-4 px-6">Status</th>
+                        <th className="py-4 px-6 text-center">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {items.map((it, idx) => (
-                        <tr key={it.id || idx} className="border-b border-gray-100 hover:bg-gray-50/50">
-                          {/* Qty */}
-                          <td className="p-1">
-                            <input
-                              type="number"
-                              required
-                              disabled={!isEditMode}
-                              className="w-full border border-gray-200 p-1 rounded font-mono text-center focus:border-smei-crimson outline-none"
-                              value={it.quantity === 0 ? "" : it.quantity}
-                              onChange={(e) => handleItemChange(idx, "quantity", e.target.value === "" ? 0 : Number(e.target.value))}
-                            />
+                      {loading ? (
+                        <TableSkeleton rows={5} columns={8} />
+                      ) : paginatedRequests.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="py-12 text-center text-gray-400">
+                            No Requests for Supply found matching filters.
                           </td>
-                          {/* Unit */}
-                          <td className="p-1">
-                            <input
-                              type="text"
-                              disabled={!isEditMode}
-                              className="w-full border border-gray-200 p-1 rounded text-center focus:border-smei-crimson outline-none"
-                              value={it.unit}
-                              onChange={(e) => handleItemChange(idx, "unit", e.target.value)}
-                            />
-                          </td>
-                          {/* Description */}
-                          <td className="p-1">
-                            <input
-                              type="text"
-                              required
-                              disabled={!isEditMode}
-                              placeholder="Name/Specs of item"
-                              className="w-full border border-gray-200 p-1 rounded focus:border-smei-crimson outline-none font-semibold text-gray-800"
-                              value={it.description}
-                              onChange={(e) => handleItemChange(idx, "description", e.target.value)}
-                            />
-                          </td>
-                          {/* Last Purchase Date */}
-                          <td className="p-1">
-                            <input
-                              type="date"
-                              disabled={!isEditMode}
-                              className="w-full border border-gray-200 p-1 rounded font-mono focus:border-smei-crimson outline-none"
-                              value={it.lastPurchaseDate}
-                              onChange={(e) => handleItemChange(idx, "lastPurchaseDate", e.target.value)}
-                            />
-                          </td>
-                          {/* Last Purchase Qty */}
-                          <td className="p-1">
-                            <input
-                              type="number"
-                              disabled={!isEditMode}
-                              className="w-full border border-gray-200 p-1 rounded font-mono focus:border-smei-crimson outline-none"
-                              value={it.lastPurchaseQuantity === 0 ? "" : it.lastPurchaseQuantity}
-                              onChange={(e) => handleItemChange(idx, "lastPurchaseQuantity", e.target.value === "" ? 0 : Number(e.target.value))}
-                            />
-                          </td>
-                          {/* Last Purchase Price */}
-                          <td className="p-1">
-                            <input
-                              type="number"
-                              step="any"
-                              disabled={!isEditMode}
-                              className="w-full border border-gray-200 p-1 rounded font-mono focus:border-smei-crimson outline-none"
-                              value={it.lastPurchaseUnitPrice === 0 ? "" : it.lastPurchaseUnitPrice}
-                              onChange={(e) => handleItemChange(idx, "lastPurchaseUnitPrice", e.target.value === "" ? 0 : Number(e.target.value))}
-                            />
-                          </td>
-                          {/* Current Purchase Date */}
-                          <td className="p-1">
-                            <input
-                              type="date"
-                              disabled={!isEditMode}
-                              className="w-full border border-gray-200 p-1 rounded font-mono focus:border-smei-crimson outline-none"
-                              value={it.currentPurchaseDate}
-                              onChange={(e) => handleItemChange(idx, "currentPurchaseDate", e.target.value)}
-                            />
-                          </td>
-                          {/* Current Qty */}
-                          <td className="p-1">
-                            <input
-                              type="number"
-                              disabled={!isEditMode}
-                              className="w-full border border-gray-200 p-1 rounded font-mono focus:border-smei-crimson outline-none"
-                              value={it.currentPurchaseQuantity === 0 ? "" : it.currentPurchaseQuantity}
-                              onChange={(e) => handleItemChange(idx, "currentPurchaseQuantity", e.target.value === "" ? 0 : Number(e.target.value))}
-                            />
-                          </td>
-                          {/* Current Purchase Price */}
-                          <td className="p-1">
-                            <input
-                              type="number"
-                              step="any"
-                              disabled={!isEditMode}
-                              className="w-full border border-gray-200 p-1 rounded font-mono focus:border-smei-crimson outline-none"
-                              value={it.currentPurchaseUnitPrice === 0 ? "" : it.currentPurchaseUnitPrice}
-                              onChange={(e) => handleItemChange(idx, "currentPurchaseUnitPrice", e.target.value === "" ? 0 : Number(e.target.value))}
-                            />
-                          </td>
-                          {/* Remarks */}
-                          <td className="p-1">
-                            <input
-                              type="text"
-                              disabled={!isEditMode}
-                              placeholder="Notes"
-                              className="w-full border border-gray-200 p-1 rounded focus:border-smei-crimson outline-none"
-                              value={it.remarks}
-                              onChange={(e) => handleItemChange(idx, "remarks", e.target.value)}
-                            />
-                          </td>
-                          {/* Action */}
-                          {isEditMode && (
-                            <td className="p-1 text-center">
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveItem(idx)}
-                                className="p-1 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded"
-                              >
-                                <Trash className="w-3.5 h-3.5" />
-                              </button>
-                            </td>
-                          )}
                         </tr>
-                      ))}
+                      ) : (
+                        filteredRequests.map((req, idx) => (
+                          <tr
+                            key={req.id}
+                            onClick={() => {
+                              setActiveRfsId(req.id);
+                              setSelectedRFS(req);
+                            }}
+                            onDoubleClick={() => handleOpenModal(req, false)}
+                            className={`cursor-pointer transition-all border-b border-gray-50/60 group ${
+                              selectedRFS?.id === req.id
+                                ? "bg-red-600/20 border-l-4 border-l-smei-crimson font-medium"
+                                : idx % 2 === 1
+                                ? "bg-gray-50/30 hover:bg-red-600/10"
+                                : "bg-white hover:bg-red-600/10"
+                            }`}
+                            title="Double-click to View details"
+                          >
+                            <td className="py-3 px-6 font-mono font-bold text-smei-darkred">
+                              <div className="flex items-center gap-2">
+                                {selectedRFS?.id === req.id && (
+                                  <div className="w-1.5 h-1.5 bg-smei-crimson rounded-full animate-pulse shrink-0" />
+                                )}
+                                <span>{formatRFSNo(req.rfsNumber, req.dateRequested)}</span>
+                              </div>
+                            </td>
+                            <td className="py-3 px-6 text-gray-700 font-semibold text-xs">
+                              {req.department === "Others" ? req.departmentOthers : req.department}
+                            </td>
+                            <td className="py-3 px-6 text-gray-500 font-mono">{req.dateRequested}</td>
+                            <td className="py-3 px-6 text-gray-500 font-mono">{req.dueDate}</td>
+                            <td className="py-3 px-6">
+                              <span className={`inline-flex px-2 py-0.5 rounded text-[10px] border ${modeColors[req.modeOfRequest] || "bg-gray-100"}`}>
+                                {req.modeOfRequest}
+                              </span>
+                            </td>
+                            <td className="py-3 px-6">
+                              <span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-bold border ${statusColors[req.status] || "bg-gray-100"}`}>
+                                {req.status}
+                              </span>
+                            </td>
+                            <td className="py-3 px-6 text-center" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+                              <div className="flex items-center justify-center gap-1.5">
+                                <button
+                                  onClick={() => handleOpenModal(req, false)}
+                                  className="p-1 hover:bg-red-50 hover:text-smei-crimson text-gray-400 rounded transition-all"
+                                  title="View details"
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </button>
+
+                                {isAuthorized && (
+                                  <button
+                                    onClick={() => handleOpenModal(req, true)}
+                                    className="p-1 hover:bg-blue-50 hover:text-blue-600 text-gray-400 rounded transition-all"
+                                    title="Edit RFS"
+                                  >
+                                    <Edit3 className="w-4 h-4" />
+                                  </button>
+                                )}
+
+                                {isAuthorized && (
+                                  <button
+                                    onClick={() => handleDelete(req.id, formatRFSNo(req.rfsNumber, req.dateRequested))}
+                                    className="p-1 hover:bg-rose-50 hover:text-rose-600 text-gray-400 rounded transition-all"
+                                    title="Delete RFS"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>
               </div>
-
-              {/* Signatories Section */}
-              <div className="border-t border-gray-100 pt-4 mt-2">
-                <h4 className="text-xs font-bold text-smei-darkred uppercase tracking-wide mb-3">Workflow Signatories</h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Requested By (Dept Head):</label>
-                    <input
-                      type="text"
-                      disabled={!isEditMode}
-                      className="w-full text-sm p-2 border border-gray-200 rounded-lg bg-gray-50/50"
-                      value={requestedBy}
-                      onChange={(e) => setRequestedBy(e.target.value)}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Verified By (Purchasing):</label>
-                    <input
-                      type="text"
-                      disabled={!isEditMode}
-                      className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson"
-                      value={verifiedBy}
-                      onChange={(e) => setVerifiedBy(e.target.value)}
-                      placeholder="Name of verifier"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Approved By (Director):</label>
-                    <input
-                      type="text"
-                      disabled={!isEditMode}
-                      className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson"
-                      value={approvedBy}
-                      onChange={(e) => setApprovedBy(e.target.value)}
-                      placeholder="Name of director"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Form Buttons */}
-              <div className="flex items-center justify-end gap-2 border-t border-gray-100 pt-4 mt-6">
-                <button
-                  type="button"
-                  onClick={handleCloseModal}
-                  className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-semibold text-gray-600 hover:bg-gray-50"
-                >
-                  {isEditMode ? "Cancel" : "Close"}
-                </button>
-                {isEditMode && (
-                  <button
-                    type="submit"
-                    className="px-5 py-2 bg-smei-crimson hover:bg-smei-darkred text-white text-sm font-semibold rounded-lg shadow-xs"
-                  >
-                    Save Request
-                  </button>
-                )}
-              </div>
-                </form>
-              </div>
-
-              {/* Right Column: Live Document Preview */}
-              <div className="lg:col-span-6 h-[450px] lg:h-[70vh] sticky top-0">
-                {currentRFSData && (
-                  <DocumentPreview
-                    moduleName="rfs"
-                    format="excel"
-                    data={currentRFSData}
-                  />
-                )}
-              </div>
-            </div>
-          </div>
+            </>
+          )}
         </div>
-      )}
+      </div>
     </div>
-  </div>
-);
+  );
 }

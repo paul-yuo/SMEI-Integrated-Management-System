@@ -12,7 +12,6 @@ import { ArrowLeft, Save, Send, CheckCircle2, AlertTriangle, Printer, Trash2, Pl
 import { exportPOToWord } from "../utils/wordExport";
 import { formatRFSNo } from "../utils/templateMapping";
 import smeiLogo from "../assets/images/smei_logo_1782431389924.jpg";
-import DocumentPreview from "./DocumentPreview";
 
 interface POFormProps {
   po?: PurchaseOrder | null; // Null means create new
@@ -83,8 +82,10 @@ export default function POForm({
   const [vat12, setVat12] = useState(0);
   const [vatExemptAmount, setVatExemptAmount] = useState(0);
   const [zeroRatedAmount, setZeroRatedAmount] = useState(0);
-  const [partsEwtRate, setPartsEwtRate] = useState(0.01);
-  const [laborEwtRate, setLaborEwtRate] = useState(0.02);
+  const [partsEwtPercentage, setPartsEwtPercentage] = useState<number>(1.0);
+  const [laborEwtPercentage, setLaborEwtPercentage] = useState<number>(2.0);
+  const partsEwtRate = partsEwtPercentage / 100;
+  const laborEwtRate = laborEwtPercentage / 100;
   const [partsEwt1, setPartsEwt1] = useState(0);
   const [laborEwt2, setLaborEwt2] = useState(0);
   const [totalAmount, setTotalAmount] = useState(0);
@@ -197,6 +198,8 @@ export default function POForm({
     zeroRatedAmount,
     partsEwt1,
     laborEwt2,
+    partsEwtPercentage,
+    laborEwtPercentage,
     totalAmount
   ]);
 
@@ -256,8 +259,23 @@ export default function POForm({
       setPartsEwt1(po.partsEwt1);
       setLaborEwt2(po.laborEwt2);
       
-      setPartsEwtRate(po.partsEwt1 > 0 ? 0.01 : 0);
-      setLaborEwtRate(po.laborEwt2 > 0 ? 0.02 : 0);
+      // Load Parts and Labor EWT Percentages
+      let loadedPartsPct = 1.0;
+      let loadedLaborPct = 2.0;
+      
+      if (po.partsEwt1 > 0 || po.ewtType === "Parts EWT") {
+        loadedPartsPct = po.ewtPercentage !== undefined ? po.ewtPercentage : 1.0;
+        loadedLaborPct = po.laborEwt2 > 0 ? 2.0 : 0.0;
+      } else if (po.laborEwt2 > 0 || po.ewtType === "Labor EWT") {
+        loadedLaborPct = po.ewtPercentage !== undefined ? po.ewtPercentage : 2.0;
+        loadedPartsPct = po.partsEwt1 > 0 ? 1.0 : 0.0;
+      } else {
+        loadedPartsPct = 0.0;
+        loadedLaborPct = 0.0;
+      }
+      
+      setPartsEwtPercentage(loadedPartsPct);
+      setLaborEwtPercentage(loadedLaborPct);
       setTotalAmount(po.totalAmount);
 
       setPaymentTerms(po.paymentTerms);
@@ -324,8 +342,17 @@ export default function POForm({
       setSignatureUrl(po.signature || "");
     } else {
       // Default Values for New PO
-      const numDigits = Math.floor(1000 + Math.random() * 9000);
-      setPoNumber(`SMEI-2026-${numDigits}`);
+      setPoNumber("SMEI-2026-PENDING");
+      api.getNextPONumber()
+        .then(({ nextNumber }) => {
+          setPoNumber(nextNumber);
+        })
+        .catch((err) => {
+          console.error("Failed to load next PO number:", err);
+          const numDigits = Math.floor(1000 + Math.random() * 9000);
+          setPoNumber(`SMEI-2026-${numDigits}`);
+        });
+
       setPoDate(new Date().toISOString().split("T")[0]);
       setDeliveryDate(new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]);
       setPreparedBy("VICEDO, Lalaine");
@@ -355,12 +382,22 @@ export default function POForm({
       setExcludeVerifiedBy2(false);
       setExcludeApprovedBy(false);
       setExcludeConforme(false);
+      
       setRfsNumber("2026-07-001");
+      api.getNextRFSNumber()
+        .then(({ nextNumber }) => {
+          setRfsNumber(nextNumber);
+        })
+        .catch((err) => {
+          console.error("Failed to load next RFS number for PO form:", err);
+        });
     }
   }, [po, currentUser]);
 
   // 7. Auto-Calculate Financials on items/category change (unless manually overriden)
   const computed = calculatePOFinancials(items, category, discountVatAmount, partsEwtRate, laborEwtRate);
+
+
 
   // Sync Payment Terms
   useEffect(() => {
@@ -550,6 +587,10 @@ export default function POForm({
       discountVatAmount,
       partsEwt1,
       laborEwt2,
+      ewtType: "Parts & Labor EWT",
+      ewtPercentage: partsEwtPercentage,
+      partsEwtPercentage,
+      laborEwtPercentage,
       totalAmount: currentTotalAmount,
 
       paymentTerms,
@@ -750,6 +791,10 @@ export default function POForm({
       zeroRatedAmount,
       partsEwt1,
       laborEwt2,
+      partsEwtPercentage,
+      laborEwtPercentage,
+      ewtType: "Parts & Labor EWT",
+      ewtPercentage: partsEwtPercentage,
       excludePreparedBy,
       excludeCheckedBy,
       excludeVerifiedBy,
@@ -768,6 +813,7 @@ export default function POForm({
     warrantyOthers, remarks, preparedBy, checkedBy, verifiedBy, verifiedBy2,
     approvedBy, conforme, totalAmount, status, discountVatAmount, vatableAmount,
     vat12, vatExemptAmount, zeroRatedAmount, partsEwt1, laborEwt2,
+    partsEwtPercentage, laborEwtPercentage,
     excludePreparedBy, excludeCheckedBy, excludeVerifiedBy, excludeVerifiedBy2,
     excludeApprovedBy, excludeConforme, additionalSignatories, signatureUrl,
     currentUser
@@ -788,14 +834,7 @@ export default function POForm({
 
         <div className="flex flex-wrap items-center gap-2">
           {!isNew && (
-            <>
-              <button
-                onClick={handlePrint}
-                className="inline-flex items-center gap-1.5 bg-white border border-gray-200 hover:border-smei-crimson text-gray-700 hover:text-smei-crimson font-semibold text-xs py-2 px-3.5 rounded-xl shadow-sm transition-all"
-              >
-                <Printer className="w-4 h-4" />
-                <span>Export PDF</span>
-              </button>
+            <div className="flex flex-col gap-1.5">
               {po && (
                 <button
                   onClick={() => exportPOToWord(po)}
@@ -805,7 +844,14 @@ export default function POForm({
                   <span>Export Word (.DOCX)</span>
                 </button>
               )}
-            </>
+              <button
+                onClick={handlePrint}
+                className="inline-flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white font-semibold text-xs py-2 px-3.5 rounded-xl shadow-sm transition-all justify-center"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Print</span>
+              </button>
+            </div>
           )}
 
           {/* Workflow approval buttons */}
@@ -875,10 +921,10 @@ export default function POForm({
         </div>
       </div>
 
-      {/* Split Layout for PO Form and Live Preview */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left Column: Form Editor */}
-        <div className="lg:col-span-6">
+      {/* Full Width Layout for PO Form */}
+      <div className="w-full">
+        {/* Form Editor */}
+        <div className="w-full">
           <form onSubmit={(e) => handleFormSave(e, false)} className="bg-white p-6 sm:p-10 rounded-2xl shadow-xl border border-gray-100 print:shadow-none print:border-none print:p-0 space-y-8">
         
         {/* Printable Header Block */}
@@ -924,10 +970,35 @@ export default function POForm({
                 onChange={(e) => {
                   const newStatus = e.target.value as POStatus;
                   if (status === "Approved" && !isAdmin) {
-                    const pin = prompt("Admin PIN code required to change an Approved PO status:");
-                    if (pin !== "1234") {
-                      alert("Invalid PIN. Status not changed.");
-                      return;
+                    let requiredPin = "1234";
+                    let isPinRequired = false;
+                    try {
+                      const savedSetting = localStorage.getItem("smei_security_config");
+                      const globalEnabled = savedSetting === null ? false : JSON.parse(savedSetting).enabled;
+
+                      if (globalEnabled) {
+                        const saved = localStorage.getItem("smei_module_pins");
+                        if (saved) {
+                          const rules = JSON.parse(saved);
+                          const rule = rules.find((r: any) => r.id === "po_status_change");
+                          if (rule) {
+                            requiredPin = rule.pinCode;
+                            isPinRequired = rule.isEnabled;
+                          }
+                        } else {
+                          isPinRequired = true;
+                        }
+                      }
+                    } catch (e) {
+                      console.error("Failed to parse module pin configuration", e);
+                    }
+
+                    if (isPinRequired) {
+                      const pin = prompt("Admin PIN code required to change an Approved PO status:");
+                      if (pin !== requiredPin) {
+                        alert("Invalid PIN. Status not changed.");
+                        return;
+                      }
                     }
                   }
                   setStatus(newStatus);
@@ -1613,7 +1684,7 @@ export default function POForm({
               </div>
             </div>
 
-            <div className="bg-gray-50 border border-gray-150 rounded-2xl p-4 space-y-2.5 text-xs">
+            <div className="bg-gray-50 border border-gray-100 rounded-2xl p-4 space-y-2.5 text-xs">
               
               {/* Vatable Amount */}
               <div className="flex items-center justify-between">
@@ -1684,55 +1755,79 @@ export default function POForm({
               </div>
 
               {/* Parts EWT */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-gray-500 font-medium">Parts EWT:</span>
-                  <select
-                    value={partsEwtRate}
-                    onChange={(e) => setPartsEwtRate(parseFloat(e.target.value))}
-                    disabled={overrideVat}
-                    className="text-xs border border-gray-200 rounded p-1 outline-none bg-white"
-                  >
-                    <option value={0}>0%</option>
-                    <option value={0.01}>1%</option>
-                    <option value={0.02}>2%</option>
-                    <option value={0.05}>5%</option>
-                    <option value={0.10}>10%</option>
-                  </select>
+              <div className="space-y-1.5 py-1.5 border-t border-gray-200/60">
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-500 font-medium flex items-center gap-1">
+                    <span>Parts EWT</span>
+                    <span className="text-[10px] bg-red-50 text-smei-crimson font-bold px-1.5 py-0.5 rounded border border-red-200">
+                      {partsEwtPercentage}%
+                    </span>
+                  </span>
+                  <input
+                    type="number"
+                    disabled={!overrideVat}
+                    value={overrideVat ? partsEwt1 : computed.partsEwt1}
+                    onChange={(e) => setPartsEwt1(parseFloat(e.target.value) || 0)}
+                    className={`w-32 text-right px-2 py-0.5 rounded font-mono font-bold ${
+                      overrideVat ? "bg-white border border-gray-300" : "bg-transparent text-gray-700"
+                    }`}
+                  />
                 </div>
-                <input
-                  type="number"
-                  disabled={!overrideVat}
-                  value={overrideVat ? partsEwt1 : computed.partsEwt1}
-                  onChange={(e) => setPartsEwt1(parseFloat(e.target.value) || 0)}
-                  className={`w-32 text-right px-2 py-0.5 rounded font-mono font-bold ${overrideVat ? "bg-white border border-gray-300" : "bg-transparent text-gray-700"}`}
-                />
+                
+                <div className="flex items-center gap-1.5 justify-end text-[10px] no-print">
+                  <span className="text-gray-400 font-semibold uppercase tracking-wider">Parts EWT Rate:</span>
+                  <div className="flex items-center">
+                    <input
+                      type="text"
+                      value={partsEwtPercentage}
+                      disabled={status !== "Draft" && !isAdmin}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/[^0-9.]/g, '');
+                        setPartsEwtPercentage(parseFloat(val) || 0);
+                      }}
+                      className="w-10 text-center border border-gray-200 rounded px-1 py-0.5 text-[10px] font-bold font-mono bg-white"
+                    />
+                    <span className="ml-0.5 text-gray-500 font-bold">%</span>
+                  </div>
+                </div>
               </div>
 
               {/* Labor EWT */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-gray-500 font-medium">Labor EWT:</span>
-                  <select
-                    value={laborEwtRate}
-                    onChange={(e) => setLaborEwtRate(parseFloat(e.target.value))}
-                    disabled={overrideVat}
-                    className="text-xs border border-gray-200 rounded p-1 outline-none bg-white"
-                  >
-                    <option value={0}>0%</option>
-                    <option value={0.01}>1%</option>
-                    <option value={0.02}>2%</option>
-                    <option value={0.05}>5%</option>
-                    <option value={0.10}>10%</option>
-                  </select>
+              <div className="space-y-1.5 py-1.5 border-t border-gray-200/60">
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-500 font-medium flex items-center gap-1">
+                    <span>Labor EWT</span>
+                    <span className="text-[10px] bg-red-50 text-smei-crimson font-bold px-1.5 py-0.5 rounded border border-red-200">
+                      {laborEwtPercentage}%
+                    </span>
+                  </span>
+                  <input
+                    type="number"
+                    disabled={!overrideVat}
+                    value={overrideVat ? laborEwt2 : computed.laborEwt2}
+                    onChange={(e) => setLaborEwt2(parseFloat(e.target.value) || 0)}
+                    className={`w-32 text-right px-2 py-0.5 rounded font-mono font-bold ${
+                      overrideVat ? "bg-white border border-gray-300" : "bg-transparent text-gray-700"
+                    }`}
+                  />
                 </div>
-                <input
-                  type="number"
-                  disabled={!overrideVat}
-                  value={overrideVat ? laborEwt2 : computed.laborEwt2}
-                  onChange={(e) => setLaborEwt2(parseFloat(e.target.value) || 0)}
-                  className={`w-32 text-right px-2 py-0.5 rounded font-mono font-bold ${overrideVat ? "bg-white border border-gray-300" : "bg-transparent text-gray-700"}`}
-                />
+                
+                <div className="flex items-center gap-1.5 justify-end text-[10px] no-print">
+                  <span className="text-gray-400 font-semibold uppercase tracking-wider">Labor EWT Rate:</span>
+                  <div className="flex items-center">
+                    <input
+                      type="text"
+                      value={laborEwtPercentage}
+                      disabled={status !== "Draft" && !isAdmin}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/[^0-9.]/g, '');
+                        setLaborEwtPercentage(parseFloat(val) || 0);
+                      }}
+                      className="w-10 text-center border border-gray-200 rounded px-1 py-0.5 text-[10px] font-bold font-mono bg-white"
+                    />
+                    <span className="ml-0.5 text-gray-500 font-bold">%</span>
+                  </div>
+                </div>
               </div>
 
               {/* Discount VAT Amount (12%) */}
@@ -1867,7 +1962,7 @@ export default function POForm({
             {/* Row 1, Left: Prepared By */}
             <div className="md:col-start-1 md:row-start-1">
               {!excludePreparedBy && (
-                <div className="flex flex-col relative w-64">
+                <div className="flex flex-col relative w-full max-w-sm">
                   <div className="flex items-center justify-between no-print">
                     <span className="font-bold text-gray-400 uppercase tracking-wider text-[10px]">1. Prepared By</span>
                     <div className="flex items-center gap-1.5">
@@ -1893,7 +1988,7 @@ export default function POForm({
                   
                   <div className="font-bold text-gray-900 text-sm mt-1">Prepared by:</div>
                   <div className="h-14"></div>
-                  <div className="border-b border-black w-64 my-1"></div>
+                  <div className="border-b border-black w-full max-w-sm my-1"></div>
                   
                   <input
                     type="text"
@@ -1919,7 +2014,7 @@ export default function POForm({
             {/* Row 1, Right: Check By */}
             <div className="md:col-start-2 md:row-start-1">
               {!excludeCheckedBy && (
-                <div className="flex flex-col relative w-64">
+                <div className="flex flex-col relative w-full max-w-sm">
                   <div className="flex items-center justify-between no-print">
                     <span className="font-bold text-gray-400 uppercase tracking-wider text-[10px]">2. Check By</span>
                     <div className="flex items-center gap-1.5">
@@ -1945,7 +2040,7 @@ export default function POForm({
                   
                   <div className="font-bold text-gray-900 text-sm mt-1">Check by:</div>
                   <div className="h-14"></div>
-                  <div className="border-b border-black w-64 my-1"></div>
+                  <div className="border-b border-black w-full max-w-sm my-1"></div>
                   
                   <input
                     type="text"
@@ -1971,7 +2066,7 @@ export default function POForm({
             {/* Row 2, Left: Verified By */}
             <div className="md:col-start-1 md:row-start-2">
               {!excludeVerifiedBy && (
-                <div className="flex flex-col relative w-64">
+                <div className="flex flex-col relative w-full max-w-sm">
                   <div className="flex items-center justify-between no-print">
                     <span className="font-bold text-gray-400 uppercase tracking-wider text-[10px]">3. Verified By</span>
                     <div className="flex items-center gap-1.5">
@@ -1997,7 +2092,7 @@ export default function POForm({
                   
                   <div className="font-bold text-gray-900 text-sm mt-1">Verified by:</div>
                   <div className="h-14"></div>
-                  <div className="border-b border-black w-64 my-1"></div>
+                  <div className="border-b border-black w-full max-w-sm my-1"></div>
                   
                   <input
                     type="text"
@@ -2023,7 +2118,7 @@ export default function POForm({
             {/* Row 2, Right: Verified By (2) */}
             <div className="md:col-start-2 md:row-start-2">
               {!excludeVerifiedBy2 && (
-                <div className="flex flex-col relative w-64">
+                <div className="flex flex-col relative w-full max-w-sm">
                   <div className="flex items-center justify-between no-print">
                     <span className="font-bold text-gray-400 uppercase tracking-wider text-[10px]">4. Verified By (2)</span>
                     <div className="flex items-center gap-1.5">
@@ -2049,7 +2144,7 @@ export default function POForm({
                   
                   <div className="font-bold text-gray-900 text-sm mt-1">Verified by:</div>
                   <div className="h-14"></div>
-                  <div className="border-b border-black w-64 my-1"></div>
+                  <div className="border-b border-black w-full max-w-sm my-1"></div>
                   
                   <input
                     type="text"
@@ -2075,7 +2170,7 @@ export default function POForm({
             {/* Row 3, Left: Approved By */}
             <div className="md:col-start-1 md:row-start-3">
               {!excludeApprovedBy && (
-                <div className="flex flex-col relative w-64">
+                <div className="flex flex-col relative w-full max-w-sm">
                   <div className="flex items-center justify-between no-print">
                     <span className="font-bold text-gray-400 uppercase tracking-wider text-[10px]">5. Approved By</span>
                     <div className="flex items-center gap-1.5">
@@ -2101,7 +2196,7 @@ export default function POForm({
                   
                   <div className="font-bold text-gray-900 text-sm mt-1">Approved by:</div>
                   <div className="h-14"></div>
-                  <div className="border-b border-black w-64 my-1"></div>
+                  <div className="border-b border-black w-full max-w-sm my-1"></div>
                   
                   <input
                     type="text"
@@ -2127,7 +2222,7 @@ export default function POForm({
             {/* Row 3, Right: Conforme */}
             <div className="md:col-start-2 md:row-start-3">
               {!excludeConforme && (
-                <div className="flex flex-col relative w-64">
+                <div className="flex flex-col relative w-full max-w-sm">
                   <div className="flex items-center justify-between no-print">
                     <span className="font-bold text-gray-400 uppercase tracking-wider text-[10px]">6. Conforme</span>
                     <div className="flex items-center gap-1.5">
@@ -2177,7 +2272,7 @@ export default function POForm({
                     )}
                   </div>
                   
-                  <div className="border-b border-black w-64 my-1"></div>
+                  <div className="border-b border-black w-full max-w-sm my-1"></div>
                   
                   <div className="text-gray-500 text-[11px] select-none pointer-events-none">
                     Printed name over signature
@@ -2190,7 +2285,7 @@ export default function POForm({
             {additionalSignatories.length > 0 && (
               <div className="md:col-span-2 mt-4 grid grid-cols-1 md:grid-cols-2 gap-x-16 gap-y-12">
                 {additionalSignatories.map((sig, idx) => (
-                  <div key={sig.id} className="flex flex-col relative w-64 group">
+                  <div key={sig.id} className="flex flex-col relative w-full max-w-sm group">
                     <div className="flex items-center justify-between no-print">
                       <span className="font-bold text-gray-400 uppercase tracking-wider text-[10px]">{6 + idx}. Additional Signatory</span>
                       <div className="flex items-center gap-1.5">
@@ -2212,7 +2307,7 @@ export default function POForm({
                     
                     <div className="font-bold text-gray-900 text-sm mt-1">Authorized Rep:</div>
                     <div className="h-14"></div>
-                    <div className="border-b border-black w-64 my-1"></div>
+                    <div className="border-b border-black w-full max-w-sm my-1"></div>
                     
                     <input
                       type="text"
@@ -2269,15 +2364,6 @@ export default function POForm({
           </div>
         )}
           </form>
-        </div>
-
-        {/* Right Column: Live Document Preview */}
-        <div className="lg:col-span-6 h-[calc(100vh-200px)] min-h-[500px] sticky top-6 no-print">
-          <DocumentPreview
-            moduleName="po"
-            format="word"
-            data={currentPOData}
-          />
         </div>
       </div>
 

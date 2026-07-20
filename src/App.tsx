@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, lazy, Suspense } from "react";
 import { User, UserRole, PurchaseOrder, Supplier, AuditLog, Notification } from "./types";
 import { api, removeToken } from "./lib/api";
 import Header, { PrintHeader } from "./components/Header";
@@ -11,20 +11,41 @@ import Login from "./components/Login";
 import Register from "./components/Register";
 import Dashboard from "./components/Dashboard";
 import ProfileModal from "./components/ProfileModal";
-import SuppliersList from "./components/SuppliersList";
-import SupplierSummaryReport from "./components/SupplierSummaryReport";
-import SupplierAnalyticsDashboard from "./components/SupplierAnalyticsDashboard";
-import AuditLogView from "./components/AuditLogView";
-import UserManagement from "./components/UserManagement";
-import RoleManagement from "./components/RoleManagement";
 import NotificationsPanel from "./components/NotificationsPanel";
-import POList from "./components/POList";
-import POForm from "./components/POForm";
-import PaymentInstructionSlipModule from "./components/PaymentInstructionSlipModule";
-import RequestForSupplyModule from "./components/RequestForSupplyModule";
-import RfsApprovalModule from "./components/RfsApprovalModule";
-import CanvassSheetModule from "./components/CanvassSheetModule";
 import smeiLogo from "./assets/images/smei_logo_1782431389924.jpg";
+import ModuleSecurityGate from "./components/ModuleSecurityGate";
+import SecurityPINModal from "./components/SecurityPINModal";
+import SystemSelector from "./components/SystemSelector";
+import TsdDashboard from "./components/TsdDashboard";
+
+// Lazy-loaded heavy modules for optimized bundle size and buttery-smooth module navigation
+const SuppliersList = lazy(() => import("./components/SuppliersList"));
+const SupplierSummaryReport = lazy(() => import("./components/SupplierSummaryReport"));
+const SupplierAnalyticsDashboard = lazy(() => import("./components/SupplierAnalyticsDashboard"));
+const AuditLogView = lazy(() => import("./components/AuditLogView"));
+const UserManagement = lazy(() => import("./components/UserManagement"));
+const RoleManagement = lazy(() => import("./components/RoleManagement"));
+const POList = lazy(() => import("./components/POList"));
+const POForm = lazy(() => import("./components/POForm"));
+const PaymentInstructionSlipModule = lazy(() => import("./components/PaymentInstructionSlipModule"));
+const RequestForSupplyModule = lazy(() => import("./components/RequestForSupplyModule"));
+const RfsApprovalModule = lazy(() => import("./components/RfsApprovalModule"));
+const CanvassSheetModule = lazy(() => import("./components/CanvassSheetModule"));
+const ControlNoModule = lazy(() => import("./components/ControlNoModule"));
+const UnloadingLoadingModule = lazy(() => import("./components/UnloadingLoadingModule"));
+const HazardousWasteModule = lazy(() => import("./components/HazardousWasteModule"));
+const WasteMovementModule = lazy(() => import("./components/WasteMovementModule"));
+const TimestampModule = lazy(() => import("./components/TimestampModule"));
+const ManifestSummaryModule = lazy(() => import("./components/ManifestSummaryModule"));
+const TsdSummaryModule = lazy(() => import("./components/TsdSummaryModule"));
+
+// Compact high-contrast module loader matching POMS design language
+const ModuleLoader = () => (
+  <div id="smei-module-loader" className="flex flex-col items-center justify-center min-h-[60vh] space-y-3">
+    <div className="w-8 h-8 border-4 border-red-600 border-t-transparent rounded-full animate-spin"></div>
+    <span className="text-xs font-semibold text-slate-500 font-sans tracking-wide uppercase">Loading POMS Module...</span>
+  </div>
+);
 import { 
   LayoutDashboard, 
   FileText, 
@@ -60,6 +81,9 @@ export default function App() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   
   const [currentTab, setCurrentTab] = useState<string>("dashboard");
+  const [activeSystem, setActiveSystem] = useState<"po" | "tsd" | null>(() => {
+    return (localStorage.getItem("smei_active_system") as "po" | "tsd" | null) || null;
+  });
   const [selectedPO, setSelectedPO] = useState<PurchaseOrder | null>(null);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [showPOForm, setShowPOForm] = useState(false);
@@ -68,6 +92,66 @@ export default function App() {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isOperationsOpen, setIsOperationsOpen] = useState(true);
+
+  // Central Security Gate state
+  const [securityChallenge, setSecurityChallenge] = useState<{
+    moduleName: "Purchase Order" | "Request For Supply" | "Payment Instruction Slip" | "Canvass Sheet" | "Request For Supply (RFS) Approval";
+    onSuccess: () => void;
+  } | null>(null);
+
+  const checkModuleAccess = (
+    moduleName: "Purchase Order" | "Request For Supply" | "Payment Instruction Slip" | "Canvass Sheet" | "Request For Supply (RFS) Approval",
+    onSuccess: () => void
+  ) => {
+    // 1. Admin always bypasses security
+    if (currentUser?.role === UserRole.Administrator) {
+      onSuccess();
+      return;
+    }
+
+    // 2. Check if a security rule is active for this module
+    let isRuleEnabled = false;
+    try {
+      const savedSetting = localStorage.getItem("smei_security_config");
+      const globalEnabled = savedSetting === null ? false : JSON.parse(savedSetting).enabled;
+      
+      if (globalEnabled) {
+        const saved = localStorage.getItem("smei_module_pins");
+        if (saved) {
+          const rules = JSON.parse(saved);
+          const rule = rules.find(
+            (r: any) => r.moduleName === moduleName && r.isEnabled === true
+          );
+          if (rule) {
+            isRuleEnabled = true;
+          }
+        } else {
+          // Default initial settings
+          isRuleEnabled = true; // Enabled by default out of the box
+        }
+      }
+    } catch (err) {
+      console.error("Failed to check module pins", err);
+    }
+
+    if (!isRuleEnabled) {
+      onSuccess();
+      return;
+    }
+
+    // 3. Check if already unlocked in this session (centralized session-wide check)
+    const isUnlockedInSession = sessionStorage.getItem("smei_session_unlocked") === "true";
+    if (isUnlockedInSession) {
+      onSuccess();
+      return;
+    }
+
+    // 4. Trigger security challenge modal
+    setSecurityChallenge({
+      moduleName,
+      onSuccess,
+    });
+  };
 
   // Track and automatically collapse sidebar for document editors
   const previousSidebarStateRef = React.useRef<boolean>(false);
@@ -159,6 +243,16 @@ export default function App() {
     }
   }, [currentUser]);
 
+  // Handle centralized session storage security clear on login state changes (login, logout, session expiration)
+  useEffect(() => {
+    sessionStorage.removeItem("smei_session_unlocked");
+    sessionStorage.removeItem("smei_unlocked_Purchase Order");
+    sessionStorage.removeItem("smei_unlocked_Request For Supply");
+    sessionStorage.removeItem("smei_unlocked_Request For Supply (RFS) Approval");
+    sessionStorage.removeItem("smei_unlocked_Payment Instruction Slip");
+    sessionStorage.removeItem("smei_unlocked_Canvass Sheet");
+  }, [currentUser]);
+
   // Auth Expired listener (auto log out on JWT expiry)
   useEffect(() => {
     const handleAuthExpired = () => {
@@ -181,9 +275,24 @@ export default function App() {
     };
   }, []);
 
+  // Periodic JWT background token refresh (every 15 minutes) for active users
+  useEffect(() => {
+    if (!currentUser) return;
+    const interval = setInterval(async () => {
+      try {
+        await api.getCurrentUser();
+      } catch (err) {
+        console.error("SMEI: Background session refresh failed", err);
+      }
+    }, 15 * 60 * 1000); // 15 minutes
+    return () => clearInterval(interval);
+  }, [currentUser]);
+
   // Auth Operations
   const handleLogin = (user: User) => {
     setCurrentUser(user);
+    setActiveSystem(null);
+    localStorage.removeItem("smei_active_system");
     setCurrentTab("dashboard");
     const greetings = ["Welcome back", "Hello there", "Good to see you", "Greetings"];
     const randomGreeting = greetings[Math.floor(Math.random() * greetings.length)];
@@ -196,6 +305,8 @@ export default function App() {
     if (!checkUnsavedChanges()) return;
     await api.logout();
     setCurrentUser(null);
+    setActiveSystem(null);
+    localStorage.removeItem("smei_active_system");
     setSelectedPO(null);
     setShowPOForm(false);
     setPOs([]);
@@ -296,9 +407,11 @@ export default function App() {
   const handleSelectPOFromNotif = (poId: string) => {
     const found = pos.find((p) => p.id === poId);
     if (found) {
-      setSelectedPO(found);
-      setShowPOForm(true);
-      setCurrentTab("po-form");
+      checkModuleAccess("Purchase Order", () => {
+        setSelectedPO(found);
+        setShowPOForm(true);
+        setCurrentTab("po-form");
+      });
     }
   };
 
@@ -314,6 +427,29 @@ export default function App() {
 
   // Dynamic Menu Items (Purged Demo switch)
   const getRoleMenuItems = (role: UserRole) => {
+    if (activeSystem === "tsd") {
+      const baseTSD = [
+        { name: "Dashboard", key: "dashboard", icon: "home" },
+        { name: "Control No", key: "control-no", icon: "review" },
+        { name: "Unloading / Loading", key: "unloading-loading", icon: "import" },
+        { name: "Hazardous Waste", key: "hazardous-waste", icon: "canvass" },
+        { name: "Waste Movement", key: "waste-movement", icon: "role-management" },
+        { name: "Timestamp", key: "timestamp", icon: "log" },
+        { name: "Manifest Summary", key: "manifest-summary", icon: "reports" },
+        { name: "TSD Summary", key: "tsd-summary", icon: "home" },
+      ];
+
+      if (role === UserRole.Administrator) {
+        return [
+          ...baseTSD,
+          { name: "User Accounts", key: "user-management", icon: "user-management" },
+          { name: "SECURITY", key: "roles", icon: "role-management" },
+          { name: "Audit Trail Logs", key: "audit-logs", icon: "log" }
+        ];
+      }
+      return baseTSD;
+    }
+
     switch (role) {
       case UserRole.Administrator:
         return [
@@ -327,7 +463,7 @@ export default function App() {
           { name: "Supplier Summary", key: "supplier-report", icon: "reports" },
           { name: "Supplier Analytics", key: "supplier-analytics", icon: "reports" },
           { name: "User Accounts", key: "user-management", icon: "user-management" },
-          { name: "Access Privilege Matrix", key: "roles", icon: "role-management" },
+          { name: "SECURITY", key: "roles", icon: "role-management" },
           { name: "Audit Trail Logs", key: "audit-logs", icon: "log" }
         ];
       case UserRole.PurchasingStaff:
@@ -404,60 +540,116 @@ export default function App() {
     return true;
   };
 
+  const getModuleForTab = (tab: string): "Purchase Order" | "Request For Supply" | "Payment Instruction Slip" | "Canvass Sheet" | "Request For Supply (RFS) Approval" | null => {
+    if (tab === "po-list" || tab === "po-form") return "Purchase Order";
+    if (tab === "pis") return "Payment Instruction Slip";
+    if (tab === "rfs") return "Request For Supply";
+    if (tab === "rfs-approval") return "Request For Supply (RFS) Approval";
+    if (tab === "canvass") return "Canvass Sheet";
+    return null;
+  };
+
   const handleMenuClick = (menuKey: string) => {
     if (!checkUnsavedChanges()) return;
-    setSelectedPO(null);
-    setShowPOForm(false);
-    setIsMobileSidebarOpen(false);
-    
-    if (menuKey === "dashboard") {
-      setCurrentTab("dashboard");
-    } else if (menuKey === "po-all") {
-      setPoListStatusFilter("All");
-      setCurrentTab("po-list");
-    } else if (menuKey === "pis") {
-      setCurrentTab("pis");
-    } else if (menuKey === "rfs") {
-      setCurrentTab("rfs");
-    } else if (menuKey === "rfs-approval") {
-      setCurrentTab("rfs-approval");
-    } else if (menuKey === "canvass") {
-      setCurrentTab("canvass");
-    } else if (menuKey === "suppliers") {
-      setCurrentTab("suppliers");
-    } else if (menuKey === "supplier-report") {
-      setCurrentTab("supplier-report");
-    } else if (menuKey === "supplier-analytics") {
-      setCurrentTab("supplier-analytics");
-    } else if (menuKey === "user-management") {
-      setCurrentTab("users");
-    } else if (menuKey === "users") {
-      setCurrentTab("users");
-    } else if (menuKey === "roles") {
-      setCurrentTab("roles");
-    } else if (menuKey === "audit-logs") {
-      setCurrentTab("audit-logs");
-    } else if (menuKey === "po-review" || menuKey === "approval-queue") {
-      setPoListStatusFilter("Pending Review");
-      setCurrentTab("po-list");
-    } else if (menuKey === "verification-queue") {
-      setPoListStatusFilter("Pending Review");
-      setCurrentTab("po-list");
-    } else if (menuKey === "final-approval-queue") {
-      setPoListStatusFilter("Pending Approval");
-      setCurrentTab("po-list");
-    } else if (menuKey === "excel-import") {
-      setPoListStatusFilter("All");
-      setCurrentTab("po-list");
-      setTimeout(() => {
-        alert("To bulk-import spreadsheets, click the 'Bulk Spreadsheet Excel Import' button at the top of the Purchase Orders Directory.");
-      }, 150);
-    } else if (menuKey === "excel-export") {
-      setPoListStatusFilter("All");
-      setCurrentTab("po-list");
-      setTimeout(() => {
-        alert("To export purchase orders, select any approved Purchase Order to view its document, or use the summary reports options.");
-      }, 150);
+
+    // Map menu keys to tabs first
+    let targetTab = "";
+    if (menuKey === "dashboard") targetTab = "dashboard";
+    else if (menuKey === "control-no") targetTab = "control-no";
+    else if (menuKey === "unloading-loading") targetTab = "unloading-loading";
+    else if (menuKey === "hazardous-waste") targetTab = "hazardous-waste";
+    else if (menuKey === "waste-movement") targetTab = "waste-movement";
+    else if (menuKey === "timestamp") targetTab = "timestamp";
+    else if (menuKey === "manifest-summary") targetTab = "manifest-summary";
+    else if (menuKey === "tsd-summary") targetTab = "tsd-summary";
+    else if (menuKey === "po-all" || menuKey === "po-review" || menuKey === "approval-queue" || menuKey === "verification-queue" || menuKey === "final-approval-queue" || menuKey === "excel-import" || menuKey === "excel-export") targetTab = "po-list";
+    else if (menuKey === "pis") targetTab = "pis";
+    else if (menuKey === "rfs") targetTab = "rfs";
+    else if (menuKey === "rfs-approval") targetTab = "rfs-approval";
+    else if (menuKey === "canvass") targetTab = "canvass";
+    else if (menuKey === "suppliers") targetTab = "suppliers";
+    else if (menuKey === "supplier-report") targetTab = "supplier-report";
+    else if (menuKey === "supplier-analytics") targetTab = "supplier-analytics";
+    else if (menuKey === "user-management" || menuKey === "users") targetTab = "users";
+    else if (menuKey === "roles") targetTab = "roles";
+    else if (menuKey === "audit-logs") targetTab = "audit-logs";
+
+    const moduleName = getModuleForTab(targetTab);
+
+    const executeClick = () => {
+      setSelectedPO(null);
+      setShowPOForm(false);
+      setIsMobileSidebarOpen(false);
+      
+      if (menuKey === "dashboard") {
+        setCurrentTab("dashboard");
+      } else if (menuKey === "control-no") {
+        setCurrentTab("control-no");
+      } else if (menuKey === "unloading-loading") {
+        setCurrentTab("unloading-loading");
+      } else if (menuKey === "hazardous-waste") {
+        setCurrentTab("hazardous-waste");
+      } else if (menuKey === "waste-movement") {
+        setCurrentTab("waste-movement");
+      } else if (menuKey === "timestamp") {
+        setCurrentTab("timestamp");
+      } else if (menuKey === "manifest-summary") {
+        setCurrentTab("manifest-summary");
+      } else if (menuKey === "tsd-summary") {
+        setCurrentTab("tsd-summary");
+      } else if (menuKey === "po-all") {
+        setPoListStatusFilter("All");
+        setCurrentTab("po-list");
+      } else if (menuKey === "pis") {
+        setCurrentTab("pis");
+      } else if (menuKey === "rfs") {
+        setCurrentTab("rfs");
+      } else if (menuKey === "rfs-approval") {
+        setCurrentTab("rfs-approval");
+      } else if (menuKey === "canvass") {
+        setCurrentTab("canvass");
+      } else if (menuKey === "suppliers") {
+        setCurrentTab("suppliers");
+      } else if (menuKey === "supplier-report") {
+        setCurrentTab("supplier-report");
+      } else if (menuKey === "supplier-analytics") {
+        setCurrentTab("supplier-analytics");
+      } else if (menuKey === "user-management") {
+        setCurrentTab("users");
+      } else if (menuKey === "users") {
+        setCurrentTab("users");
+      } else if (menuKey === "roles") {
+        setCurrentTab("roles");
+      } else if (menuKey === "audit-logs") {
+        setCurrentTab("audit-logs");
+      } else if (menuKey === "po-review" || menuKey === "approval-queue") {
+        setPoListStatusFilter("Pending Review");
+        setCurrentTab("po-list");
+      } else if (menuKey === "verification-queue") {
+        setPoListStatusFilter("Pending Review");
+        setCurrentTab("po-list");
+      } else if (menuKey === "final-approval-queue") {
+        setPoListStatusFilter("Pending Approval");
+        setCurrentTab("po-list");
+      } else if (menuKey === "excel-import") {
+        setPoListStatusFilter("All");
+        setCurrentTab("po-list");
+        setTimeout(() => {
+          alert("To bulk-import spreadsheets, click the 'Bulk Spreadsheet Excel Import' button at the top of the Purchase Orders Directory.");
+        }, 150);
+      } else if (menuKey === "excel-export") {
+        setPoListStatusFilter("All");
+        setCurrentTab("po-list");
+        setTimeout(() => {
+          alert("To export purchase orders, select any approved Purchase Order to view its document, or use the summary reports options.");
+        }, 150);
+      }
+    };
+
+    if (moduleName) {
+      checkModuleAccess(moduleName, executeClick);
+    } else {
+      executeClick();
     }
   };
 
@@ -501,6 +693,13 @@ export default function App() {
 
   const isMenuLinkActive = (menuKey: string) => {
     if (menuKey === "dashboard") return currentTab === "dashboard";
+    if (menuKey === "control-no") return currentTab === "control-no";
+    if (menuKey === "unloading-loading") return currentTab === "unloading-loading";
+    if (menuKey === "hazardous-waste") return currentTab === "hazardous-waste";
+    if (menuKey === "waste-movement") return currentTab === "waste-movement";
+    if (menuKey === "timestamp") return currentTab === "timestamp";
+    if (menuKey === "manifest-summary") return currentTab === "manifest-summary";
+    if (menuKey === "tsd-summary") return currentTab === "tsd-summary";
     if (menuKey === "pis") return currentTab === "pis";
     if (menuKey === "rfs") return currentTab === "rfs";
     if (menuKey === "rfs-approval") return currentTab === "rfs-approval";
@@ -540,6 +739,20 @@ export default function App() {
     return <Login onLoginSuccess={handleLogin} />;
   }
 
+  if (activeSystem === null) {
+    return (
+      <SystemSelector
+        currentUser={currentUser}
+        onSelectSystem={(system) => {
+          setActiveSystem(system);
+          localStorage.setItem("smei_active_system", system);
+          setCurrentTab("dashboard");
+        }}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-neutral-50 dark:bg-[#0a0a0a] flex font-sans text-neutral-800 dark:text-neutral-200 print:block transition-colors duration-300">
       
@@ -566,7 +779,7 @@ export default function App() {
               onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
               title="Click to toggle sidebar"
             >
-              <span className="text-white font-mono font-black text-sm tracking-tighter animate-pulse">SM</span>
+              <span className="text-white font-mono font-black text-sm tracking-tighter animate-pulse">SMEI</span>
             </div>
             
             {/* Title Block */}
@@ -681,9 +894,42 @@ export default function App() {
               </select>
             </div>
           )}
+          {/* System Portal Switcher */}
+          {!isSidebarCollapsed && (
+            <div className="mx-3 mt-auto mb-2 shrink-0">
+              <button
+                onClick={() => {
+                  if (checkUnsavedChanges()) {
+                    setActiveSystem(null);
+                    localStorage.removeItem("smei_active_system");
+                  }
+                }}
+                className="w-[calc(100%-8px)] mx-1 flex items-center justify-center gap-2 py-2 px-4 rounded-lg bg-red-50 hover:bg-red-100 text-smei-crimson dark:bg-red-950/20 dark:text-rose-400 dark:hover:bg-red-950/40 transition-colors font-mono font-bold text-[10px] uppercase tracking-wider border border-red-200 dark:border-red-900/30 cursor-pointer"
+              >
+                ◀ Switch System Portal
+              </button>
+            </div>
+          )}
+          {isSidebarCollapsed && (
+            <div className="mt-auto mb-2 flex justify-center shrink-0">
+              <button
+                onClick={() => {
+                  if (checkUnsavedChanges()) {
+                    setActiveSystem(null);
+                    localStorage.removeItem("smei_active_system");
+                  }
+                }}
+                className="w-9 h-9 rounded-full bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/30 flex items-center justify-center text-smei-crimson dark:text-rose-400 hover:text-red-700 dark:hover:text-rose-300 transition-colors cursor-pointer"
+                title="Switch System Portal"
+              >
+                ◀
+              </button>
+            </div>
+          )}
+
           {/* Theme Switcher */}
           {!isSidebarCollapsed && (
-            <div className="mx-3 mt-auto mb-4 shrink-0">
+            <div className="mx-3 mb-4 shrink-0">
               <button
                 onClick={toggleTheme}
                 className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors font-medium text-xs border border-gray-200 dark:border-slate-700"
@@ -693,13 +939,13 @@ export default function App() {
             </div>
           )}
           {isSidebarCollapsed && (
-            <div className="mt-auto mb-4 flex justify-center shrink-0">
+            <div className="mb-4 flex justify-center shrink-0">
               <button
                 onClick={toggleTheme}
                 className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 flex items-center justify-center text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
                 title={theme === 'light' ? "Switch to Dark Mode" : "Switch to Light Mode"}
               >
-                {theme === 'light' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
+                {theme === 'light' ? <Moon className="w-4 h-4 pointer-events-none" /> : <Sun className="w-4 h-4 pointer-events-none" />}
               </button>
             </div>
           )}
@@ -717,7 +963,7 @@ export default function App() {
               {(() => {
                 const initials = currentUser.fullName
                   ? currentUser.fullName.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)
-                  : "SM";
+                  : "SMEI";
                 return initials;
               })()}
             </div>
@@ -774,9 +1020,18 @@ export default function App() {
           onLogout={handleLogout}
           onNavigate={(tab) => {
             if (!checkUnsavedChanges()) return;
-            setSelectedPO(null);
-            setShowPOForm(false);
-            setCurrentTab(tab);
+            const moduleName = getModuleForTab(tab);
+            if (moduleName) {
+              checkModuleAccess(moduleName, () => {
+                setSelectedPO(null);
+                setShowPOForm(false);
+                setCurrentTab(tab);
+              });
+            } else {
+              setSelectedPO(null);
+              setShowPOForm(false);
+              setCurrentTab(tab);
+            }
           }}
           currentTab={currentTab}
           unreadCount={unreadAlertsCount}
@@ -786,6 +1041,14 @@ export default function App() {
             setIsProfileModalOpen(true);
           }}
           onToggleSidebar={() => setIsMobileSidebarOpen(prev => !prev)}
+          activeSystem={activeSystem}
+          onSwitchSystem={() => {
+            if (checkUnsavedChanges()) {
+              setActiveSystem(null);
+              localStorage.removeItem("smei_active_system");
+              sessionStorage.removeItem("smei_portal_unlocked");
+            }
+          }}
         />
 
         {/* 2. Print-Only document header layout */}
@@ -793,58 +1056,101 @@ export default function App() {
 
         {/* 3. Main Content Views Routing */}
         <main className="flex-1 bg-neutral-50/50 dark:bg-[#0a0a0a] transition-colors duration-300">
-          
-          {/* Dynamic Forms views */}
-          {showPOForm || currentTab === "po-form" ? (
-            <POForm
-              po={selectedPO}
-              suppliers={suppliers}
-              pos={pos}
-              currentUser={currentUser}
-              onSave={(savedPO) => {
-                window.smeiHasUnsavedChanges = false;
-                handleSavePO(savedPO);
-              }}
-              onCancel={() => {
-                window.smeiHasUnsavedChanges = false;
-                setSelectedPO(null);
-                setShowPOForm(false);
-                setCurrentTab("po-list");
-              }}
-            />
+          <Suspense fallback={<ModuleLoader />}>
+            {/* Dynamic Forms views */}
+            {showPOForm || currentTab === "po-form" ? (
+            <ModuleSecurityGate moduleName="Purchase Order" currentUser={currentUser}>
+              <POForm
+                po={selectedPO}
+                suppliers={suppliers}
+                pos={pos}
+                currentUser={currentUser}
+                onSave={(savedPO) => {
+                  window.smeiHasUnsavedChanges = false;
+                  handleSavePO(savedPO);
+                }}
+                onCancel={() => {
+                  window.smeiHasUnsavedChanges = false;
+                  setSelectedPO(null);
+                  setShowPOForm(false);
+                  setCurrentTab("po-list");
+                }}
+              />
+            </ModuleSecurityGate>
           ) : (
             <>
               {currentTab === "dashboard" && (
-                <Dashboard
-                  pos={pos}
-                  suppliers={suppliers}
-                  currentUser={currentUser}
-                  onNavigateToPOList={() => setCurrentTab("po-list")}
-                  onNavigateToSuppliers={() => setCurrentTab("suppliers")}
-                  onSelectPO={(po) => {
-                    setSelectedPO(po);
-                    setShowPOForm(true);
-                  }}
-                />
+                activeSystem === "po" ? (
+                  <Dashboard
+                    pos={pos}
+                    suppliers={suppliers}
+                    currentUser={currentUser}
+                    onNavigateToPOList={() => {
+                      checkModuleAccess("Purchase Order", () => {
+                        setCurrentTab("po-list");
+                      });
+                    }}
+                    onNavigateToSuppliers={() => setCurrentTab("suppliers")}
+                    onSelectPO={(po) => {
+                      checkModuleAccess("Purchase Order", () => {
+                        setSelectedPO(po);
+                        setShowPOForm(true);
+                      });
+                    }}
+                    onNavigate={handleMenuClick}
+                  />
+                ) : (
+                  <TsdDashboard onNavigate={(tab) => setCurrentTab(tab)} />
+                )
+              )}
+
+              {currentTab === "control-no" && (
+                <ControlNoModule />
+              )}
+
+              {currentTab === "unloading-loading" && (
+                <UnloadingLoadingModule />
+              )}
+
+              {currentTab === "hazardous-waste" && (
+                <HazardousWasteModule />
+              )}
+
+              {currentTab === "waste-movement" && (
+                <WasteMovementModule />
+              )}
+
+              {currentTab === "timestamp" && (
+                <TimestampModule />
+              )}
+
+              {currentTab === "manifest-summary" && (
+                <ManifestSummaryModule />
+              )}
+
+              {currentTab === "tsd-summary" && (
+                <TsdSummaryModule />
               )}
 
               {currentTab === "po-list" && (
-                <POList
-                  pos={pos}
-                  suppliers={suppliers}
-                  currentUser={currentUser}
-                  onSelectPO={(po) => {
-                    setSelectedPO(po);
-                    setShowPOForm(true);
-                  }}
-                  onAddNewPO={() => {
-                    setSelectedPO(null);
-                    setShowPOForm(true);
-                  }}
-                  onDeletePO={handleDeletePO}
-                  onImportPOs={handleImportPOs}
-                  initialStatusFilter={poListStatusFilter}
-                />
+                <ModuleSecurityGate moduleName="Purchase Order" currentUser={currentUser}>
+                  <POList
+                    pos={pos}
+                    suppliers={suppliers}
+                    currentUser={currentUser}
+                    onSelectPO={(po) => {
+                      setSelectedPO(po);
+                      setShowPOForm(true);
+                    }}
+                    onAddNewPO={() => {
+                      setSelectedPO(null);
+                      setShowPOForm(true);
+                    }}
+                    onDeletePO={handleDeletePO}
+                    onImportPOs={handleImportPOs}
+                    initialStatusFilter={poListStatusFilter}
+                  />
+                </ModuleSecurityGate>
               )}
 
               {currentTab === "suppliers" && (
@@ -876,27 +1182,35 @@ export default function App() {
               )}
 
               {currentTab === "pis" && (
-                <PaymentInstructionSlipModule
-                  currentUser={currentUser}
-                />
+                <ModuleSecurityGate moduleName="Payment Instruction Slip" currentUser={currentUser}>
+                  <PaymentInstructionSlipModule
+                    currentUser={currentUser}
+                  />
+                </ModuleSecurityGate>
               )}
 
               {currentTab === "rfs" && (
-                <RequestForSupplyModule
-                  currentUser={currentUser}
-                />
+                <ModuleSecurityGate moduleName="Request For Supply" currentUser={currentUser}>
+                  <RequestForSupplyModule
+                    currentUser={currentUser}
+                  />
+                </ModuleSecurityGate>
               )}
 
               {currentTab === "rfs-approval" && (
-                <RfsApprovalModule
-                  currentUser={currentUser}
-                />
+                <ModuleSecurityGate moduleName="Request For Supply (RFS) Approval" currentUser={currentUser}>
+                  <RfsApprovalModule
+                    currentUser={currentUser}
+                  />
+                </ModuleSecurityGate>
               )}
 
               {currentTab === "canvass" && (
-                <CanvassSheetModule
-                  currentUser={currentUser}
-                />
+                <ModuleSecurityGate moduleName="Canvass Sheet" currentUser={currentUser}>
+                  <CanvassSheetModule
+                    currentUser={currentUser}
+                  />
+                </ModuleSecurityGate>
               )}
 
               {(currentTab === "users" || currentTab === "roles" || currentTab === "audit-logs") && currentUser.role !== UserRole.Administrator ? (
@@ -929,6 +1243,7 @@ export default function App() {
               )}
             </>
           )}
+          </Suspense>
         </main>
 
         {/* 4. Real-time Notifications Slide-out Drawer */}
@@ -969,6 +1284,20 @@ export default function App() {
           }}
           initialTab={profileModalSection}
         />
+
+        {securityChallenge && (
+          <SecurityPINModal
+            moduleName={securityChallenge.moduleName}
+            onSuccess={() => {
+              const successCallback = securityChallenge.onSuccess;
+              setSecurityChallenge(null);
+              successCallback();
+            }}
+            onClose={() => {
+              setSecurityChallenge(null);
+            }}
+          />
+        )}
       </div>
     </div>
   );
