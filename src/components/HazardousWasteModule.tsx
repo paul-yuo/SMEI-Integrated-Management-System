@@ -266,8 +266,8 @@ export default function HazardousWasteModule() {
   const handleCreateNew = () => {
     setEditingRecordId(null);
     setClient("");
-    // Pre-populate with a generated valid manifest number using shared generator helper
-    setManifestNo(generateManifestNumber("R3"));
+    // Initial value of the Manifest Number input field must be empty string
+    setManifestNo("");
     setQuantityKg("");
     // Hauling date must be empty/blank by default to require manual user selection
     setHaulingDate("");
@@ -424,7 +424,7 @@ export default function HazardousWasteModule() {
   const handleEditRecord = (record: ManifestRecord) => {
     setEditingRecordId(record.id);
     setClient(record.client);
-    setManifestNo(record.manifestNo);
+    setManifestNo((record.manifestNo || "").toUpperCase());
     setQuantityKg(record.quantityKg);
     setHaulingDate(record.date);
     setRecycleCertNo(record.recycle);
@@ -572,7 +572,7 @@ export default function HazardousWasteModule() {
             className="bg-smei-crimson hover:bg-smei-darkred text-white text-xs font-semibold h-[38px] px-4 rounded-lg flex items-center justify-center gap-1.5 shadow-sm transition-all hover:scale-[1.02] active:scale-95 cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            <span>+ New Hazardous Waste Entry</span>
+            <span>New Hazardous Waste Entry</span>
           </button>
 
           <button
@@ -583,6 +583,15 @@ export default function HazardousWasteModule() {
             <FileSpreadsheet className="w-4 h-4" />
             <span>Export Selected Manifest</span>
           </button>
+
+          {selectedRecord && (
+            <div className="flex items-center gap-2 ml-2">
+              <span className="text-[10px] font-bold text-gray-500 uppercase font-mono tracking-wider">Selected:</span>
+              <span className="text-[11px] font-bold font-mono text-smei-crimson bg-red-50 border border-red-200 px-2.5 py-1 rounded-md">
+                {selectedRecord.manifestNo}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Search */}
@@ -807,8 +816,8 @@ export default function HazardousWasteModule() {
                     type="text"
                     required
                     value={manifestNo}
-                    onChange={(e) => setManifestNo(e.target.value)}
-                    placeholder="M-R3-2026-07-000000"
+                    onChange={(e) => setManifestNo(e.target.value.toUpperCase())}
+                    placeholder="M-R3-2026-07-123456"
                     className={`w-full bg-white dark:bg-slate-900 text-gray-700 dark:text-slate-200 border rounded-lg text-xs p-2.5 focus:outline-none focus:ring-1 focus:ring-smei-crimson focus:border-transparent font-mono ${
                       manifestNo && !validateManifestNumber(manifestNo)
                         ? "border-amber-400 dark:border-amber-500 focus:ring-amber-500"

@@ -54,7 +54,6 @@ import {
   Settings, 
   FileUp, 
   FileDown, 
-  Eye, 
   ClipboardCheck, 
   BarChart3,
   UserCheck,
@@ -219,19 +218,20 @@ export default function App() {
   const loadAllData = async () => {
     if (!currentUser) return;
     try {
-      const fetchedPOs = await api.getPOs();
+      const isAdmin = currentUser.role === UserRole.Administrator;
+      const [fetchedPOs, fetchedSuppliers, fetchedNotifs, fetchedLogs] = await Promise.all([
+        api.getPOs(),
+        api.getSuppliers(),
+        api.getNotifications(),
+        isAdmin ? api.getAuditLogs() : Promise.resolve([])
+      ]);
+      
       setPOs(fetchedPOs);
-      
-      const fetchedSuppliers = await api.getSuppliers();
       setSuppliers(fetchedSuppliers);
-      
-      if (currentUser.role === UserRole.Administrator) {
-        const fetchedLogs = await api.getAuditLogs();
+      setNotifications(fetchedNotifs);
+      if (isAdmin) {
         setAuditLogs(fetchedLogs);
       }
-      
-      const fetchedNotifs = await api.getNotifications();
-      setNotifications(fetchedNotifs);
     } catch (err) {
       console.error("Failed to sync database resources:", err);
     }

@@ -309,7 +309,7 @@ export default function UnloadingLoadingModule() {
 
   const handleEditComp = (record: ComplianceRecord) => {
     setEditingRecord(record);
-    setCompCA(record.caNumber);
+    setCompCA((record.caNumber || "").toUpperCase());
     setCompTitle(record.title);
     setCompDate(record.date);
     setCompUnloadingDesc(record.unloadingDesc);
@@ -428,6 +428,15 @@ export default function UnloadingLoadingModule() {
             onClick={handleExportExcelSelected}
             disabled={!selectedRecordId}
           />
+
+          {selectedRecord && (
+            <div className="flex items-center gap-2 ml-2">
+              <span className="text-[10px] font-bold text-gray-500 uppercase font-mono tracking-wider">Selected:</span>
+              <span className="text-[11px] font-bold font-mono text-smei-crimson bg-red-50 border border-red-200 px-2.5 py-1 rounded-md">
+                {selectedRecord.caNumber}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Search */}
@@ -699,7 +708,7 @@ export default function UnloadingLoadingModule() {
                     type="text"
                     required
                     value={compCA}
-                    onChange={(e) => setCompCA(e.target.value)}
+                    onChange={(e) => setCompCA(e.target.value.toUpperCase())}
                     placeholder="e.g. M-R3-2026-07-632758"
                     className={`w-full bg-white dark:bg-slate-900 text-gray-700 dark:text-slate-200 border rounded-lg text-xs p-2.5 focus:outline-none focus:ring-1 focus:ring-smei-crimson focus:border-transparent font-mono ${
                       compCA && !validateManifestNumber(compCA)

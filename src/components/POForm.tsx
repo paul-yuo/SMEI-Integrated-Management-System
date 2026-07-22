@@ -8,8 +8,8 @@ import { PurchaseOrder, POItem, Supplier, User, UserRole, POStatus, Signatory } 
 import { calculatePOFinancials } from "../store";
 import { api } from "../lib/api";
 import { motion } from "motion/react";
-import { ArrowLeft, Save, Send, CheckCircle2, AlertTriangle, Printer, Trash2, Plus, RefreshCw, PenTool, Check, FileCheck, CircleSlash, XCircle, FileText } from "lucide-react";
-import { exportPOToWord } from "../utils/wordExport";
+import { ArrowLeft, Save, Send, CheckCircle2, AlertTriangle, Printer, Trash2, Plus, RefreshCw, PenTool, Check, FileCheck, CircleSlash, XCircle, FileText, FileSpreadsheet } from "lucide-react";
+import { exportPOToWord, exportPOToXLSM } from "../utils/wordExport";
 import { formatRFSNo } from "../utils/templateMapping";
 import smeiLogo from "../assets/images/smei_logo_1782431389924.jpg";
 
@@ -225,7 +225,7 @@ export default function POForm({
   // 6. Pre-fill State on Load
   useEffect(() => {
     if (po) {
-      setPoNumber(po.poNumber);
+      setPoNumber((po.poNumber || "").toUpperCase());
       setRfsNumber(po.rfsNumber || "");
       setPoDate(po.poDate);
       setDeliveryDate(po.deliveryDate);
@@ -836,13 +836,24 @@ export default function POForm({
           {!isNew && (
             <div className="flex flex-col gap-1.5">
               {po && (
-                <button
-                  onClick={() => exportPOToWord(po)}
-                  className="inline-flex items-center gap-1.5 bg-[#2B579A] hover:bg-[#1C3A6A] text-white font-semibold text-xs py-2 px-3.5 rounded-xl shadow-sm transition-all"
-                >
-                  <FileText className="w-4 h-4" />
-                  <span>Export Word (.DOCX)</span>
-                </button>
+                <div className="flex flex-col sm:flex-row gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => exportPOToXLSM(po)}
+                    className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs py-2 px-3.5 rounded-xl shadow-sm transition-all"
+                  >
+                    <FileSpreadsheet className="w-4 h-4" />
+                    <span>Export Excel (.XLSM)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => exportPOToWord(po)}
+                    className="inline-flex items-center gap-1.5 bg-[#2B579A] hover:bg-[#1C3A6A] text-white font-semibold text-xs py-2 px-3.5 rounded-xl shadow-sm transition-all"
+                  >
+                    <FileText className="w-4 h-4" />
+                    <span>Export Word (.DOCX)</span>
+                  </button>
+                </div>
               )}
               <button
                 onClick={handlePrint}
@@ -1312,7 +1323,7 @@ export default function POForm({
                   disabled={!isNew && !isAdmin}
                   value={poNumber}
                   onChange={(e) => {
-                    setPoNumber(e.target.value);
+                    setPoNumber(e.target.value.toUpperCase());
                     if (errors.poNumber) setErrors(prev => ({ ...prev, poNumber: "" }));
                   }}
                   placeholder="e.g. SMEI-2026-0001"

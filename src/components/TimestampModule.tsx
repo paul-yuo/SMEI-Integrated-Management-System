@@ -257,6 +257,15 @@ export default function TimestampModule() {
             Upload and archive timestamp validation photos with automated Excel report export.
           </p>
         </div>
+
+        {selectedRecord && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-gray-500 uppercase font-mono tracking-wider">Selected:</span>
+            <span className="text-[11px] font-bold font-mono text-smei-crimson bg-red-50 border border-red-200 px-2.5 py-1 rounded-md">
+              {selectedRecord.id}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Toolbar */}

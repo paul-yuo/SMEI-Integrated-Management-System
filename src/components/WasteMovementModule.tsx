@@ -23,7 +23,6 @@ import {
   Trash
 } from "lucide-react";
 import { exportExcelWithTemplate } from "../utils/templateExport";
-import { generateXlsxBlob } from "../utils/templatePreview";
 
 // Self-contained IndexedDB utility inside WasteMovementModule.tsx
 const DB_NAME = "smei_waste_movement_db";
@@ -109,8 +108,8 @@ export interface WasteMovementRecord {
 export default function WasteMovementModule() {
   const [movements, setMovements] = useState<WasteMovementRecord[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [methodFilter, setMethodFilter] = useState("All");
   const [selectedMovementId, setSelectedMovementId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"details" | "preview">("details");
 
   // Sorting state
   const [sortField, setSortField] = useState<keyof WasteMovementRecord>("transportDate");
@@ -154,9 +153,7 @@ export default function WasteMovementModule() {
     }
   }, [notification]);
 
-  // Preview States
-  const [previewHtml, setPreviewHtml] = useState<string>("");
-  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
 
   // Load ledger from local storage on mount
   useEffect(() => {
@@ -224,7 +221,11 @@ export default function WasteMovementModule() {
       ];
       setMovements(initial);
       setSelectedMovementId(initial[0].id);
-      localStorage.setItem("tsd_waste_movements", JSON.stringify(initial));
+      try {
+        localStorage.setItem("tsd_waste_movements", JSON.stringify(initial));
+      } catch (err) {
+        console.error("SMEI: Initial seed of movements failed", err);
+      }
 
       // Asynchronously pre-seed files to IndexedDB
       initial.forEach(rec => {
@@ -244,7 +245,21 @@ export default function WasteMovementModule() {
 
   const saveToStorage = (updated: WasteMovementRecord[]) => {
     setMovements(updated);
-    localStorage.setItem("tsd_waste_movements", JSON.stringify(updated));
+    try {
+      localStorage.setItem("tsd_waste_movements", JSON.stringify(updated));
+    } catch (error) {
+      console.error("SMEI: Failed to save movements to localStorage:", error);
+      const isQuota = error instanceof DOMException && (
+        error.name === "QuotaExceededError" ||
+        error.code === 22 ||
+        error.name === "NS_ERROR_DOM_QUOTA_REACHED"
+      );
+      if (isQuota) {
+        showNotification("Warning: Browser storage is full. Your list changes are saved in memory but could not be persisted.", "error");
+      } else {
+        showNotification("Warning: Failed to save record changes to browser storage.", "error");
+      }
+    }
   };
 
   // Method selector prefill
@@ -406,8 +421,8 @@ export default function WasteMovementModule() {
   const handleEditRecord = async (rec: WasteMovementRecord) => {
     setEditingRecordId(rec.id);
     setFormTransportDate(rec.transportDate);
-    setFormCrdNo(rec.crdNo);
-    setFormRcNo(rec.rcNo);
+    setFormCrdNo((rec.crdNo || "").toUpperCase());
+    setFormRcNo((rec.rcNo || "").toUpperCase());
     setFormSignedBy(rec.signedBy);
     setFormNotedBy(rec.notedBy);
     setFormMethods(rec.methods);
@@ -571,85 +586,7 @@ export default function WasteMovementModule() {
     }
   };
 
-  // Live High-Fidelity Excel Layout Preview builder
-  useEffect(() => {
-    if (!selectedMovementId) {
-      setPreviewHtml("");
-      return;
-    }
 
-    let active = true;
-
-    const loadPreview = async () => {
-      setIsPreviewLoading(true);
-      try {
-        const rec = movements.find(m => m.id === selectedMovementId);
-        if (!rec) {
-          if (active) setPreviewHtml("");
-          return;
-        }
-
-        const methodsList = rec.methods || [];
-        const m1 = methodsList.find(m => m.method === "Export for recovery");
-        const m2 = methodsList.find(m => m.method === "Disposal");
-        const m3 = methodsList.find(m => m.method === "Recycling/Recovery");
-
-        const exportData = {
-          TRANSPORT_DATE: rec.transportDate || "",
-          RECYCLE_NO: rec.rcNo || "N/A",
-          CRD_NO: rec.crdNo || "",
-          SIGNED_BY: rec.signedBy || "ENGR. MARY ANN PEDROSO",
-          SIGNED_POSITION: "Pollution Control Officer",
-          NOTED_BY: rec.notedBy || "APRILYN ROGADOR",
-          NOTED_POSITION: "Asst. Admin/Technical Manager",
-          TOTAL_QTY: rec.totalQty || 0,
-          
-          METHOD_1: m1 ? m1.method : "",
-          QUANTITY_1: m1 ? m1.quantity : "",
-          DESTINATION_1: m1 ? m1.destination : "",
-          REMARKS_1: m1 ? (m1.remarks || rec.sourceFileName || "") : "",
-
-          METHOD_2: m2 ? m2.method : "",
-          QUANTITY_2: m2 ? m2.quantity : "",
-          DESTINATION_2: m2 ? m2.destination : "",
-          REMARKS_2: m2 ? (m2.remarks || rec.sourceFileName || "") : "",
-
-          METHOD_3: m3 ? m3.method : "",
-          QUANTITY_3: m3 ? m3.quantity : "",
-          DESTINATION_3: m3 ? m3.destination : "",
-          REMARKS_3: m3 ? (m3.remarks || rec.sourceFileName || "") : ""
-        };
-
-        const { html } = await generateXlsxBlob(
-          "WASTE_MOVEMENT_TEMPLATE.xlsm",
-          exportData,
-          "items",
-          []
-        );
-        if (active) {
-          setPreviewHtml(html);
-        }
-      } catch (err) {
-        console.error("Error generating live template preview:", err);
-        if (active) {
-          setPreviewHtml(`<div class="p-6 text-center text-xs font-mono text-slate-400">Layout-preserving preview unavailable.</div>`);
-        }
-      } finally {
-        if (active) {
-          setIsPreviewLoading(false);
-        }
-      }
-    };
-
-    const timer = setTimeout(() => {
-      loadPreview();
-    }, 450);
-
-    return () => {
-      active = false;
-      clearTimeout(timer);
-    };
-  }, [selectedMovementId, movements]);
 
   // Export Excel handler
   const handleExportExcel = async (rec: WasteMovementRecord) => {
@@ -708,6 +645,60 @@ export default function WasteMovementModule() {
     }
   };
 
+  const handleExportPdf = async (rec: WasteMovementRecord) => {
+    if (isExportingPdf) return;
+    setIsExportingPdf(true);
+    try {
+      if (rec.sourceFileName?.toLowerCase().endsWith(".docx")) {
+        showNotification("High-fidelity DOCX to PDF conversion is not supported in the current browser architecture. Please upload the source document as a PDF or image instead.", "error");
+        setIsExportingPdf(false);
+        return;
+      }
+
+      let fileData = "";
+      try {
+        fileData = await getFileFromIndexedDB(`tsd_wm_file_${rec.id}`);
+      } catch (err) {
+        console.warn("IndexedDB fetch failed during export:", err);
+      }
+      if (!fileData) {
+        fileData = localStorage.getItem(`tsd_wm_file_${rec.id}`) || rec.sourceFileData || "";
+      }
+      
+      if (!fileData) {
+        alert("The original source file could not be retrieved from local storage. Please re-upload or edit the entry.");
+        setIsExportingPdf(false);
+        return;
+      }
+      
+      const { mergeSourceAndExcelPdf } = await import("../utils/pdfMerger");
+      const { blob: mergedPdfBlob, hasMultiplePages } = await mergeSourceAndExcelPdf(rec.sourceFileName, fileData, rec);
+      
+      const { saveAs } = await import("file-saver");
+      const filename = getFormattedFilename(rec.transportDate) + ".pdf";
+      saveAs(mergedPdfBlob, filename);
+      
+      if (hasMultiplePages) {
+        showNotification("Multi-page combined PDF generated successfully. All source document pages have been fully preserved with the Waste Movement page attached at the end.", "success");
+      } else {
+        showNotification("Combined PDF generated successfully. The source document and Waste Movement page have been merged.", "success");
+      }
+    } catch (error) {
+      console.error("Failed to generate combined PDF:", error);
+      alert("Failed to compile and merge combined PDF. Please verify document formatting.");
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
+
+  const handleExportSelectedPdf = () => {
+    if (!selectedMovementId) return;
+    const rec = movements.find(m => m.id === selectedMovementId);
+    if (rec) {
+      handleExportPdf(rec);
+    }
+  };
+
   // Search filtering
   const filteredMovements = movements.filter(m => {
     const safeCrdNo = m.crdNo || "";
@@ -721,7 +712,8 @@ export default function WasteMovementModule() {
       safeRcNo.toLowerCase().includes(term) ||
       safeSourceFileName.toLowerCase().includes(term) ||
       safeMethods.some(method => (method.method || "").toLowerCase().includes(term));
-    return matchesSearch;
+    const matchesMethod = methodFilter === "All" || safeMethods.some(method => method.method === methodFilter);
+    return matchesSearch && matchesMethod;
   });
 
   // Sorting
@@ -803,6 +795,24 @@ export default function WasteMovementModule() {
             <FileSpreadsheet className="w-4 h-4" />
             <span>Export Excel</span>
           </button>
+
+          <button
+            onClick={handleExportSelectedPdf}
+            disabled={!selectedMovementId || isExportingPdf}
+            className="bg-red-700 hover:bg-red-800 disabled:opacity-50 text-white text-xs font-semibold h-[38px] px-4 rounded-lg flex items-center justify-center gap-1.5 shadow-sm transition-all hover:scale-[1.02] active:scale-95 cursor-pointer font-sans"
+          >
+            <FileText className="w-4 h-4" />
+            <span>{isExportingPdf ? "Exporting PDF..." : "Export Combined PDF"}</span>
+          </button>
+
+          {selectedRecord && (
+            <div className="flex items-center gap-2 ml-2">
+              <span className="text-[10px] font-bold text-gray-500 uppercase font-mono tracking-wider">Selected:</span>
+              <span className="text-[11px] font-bold font-mono text-smei-crimson bg-red-50 border border-red-200 px-2.5 py-1 rounded-md">
+                {selectedRecord.crdNo}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Search */}
@@ -820,13 +830,28 @@ export default function WasteMovementModule() {
 
       {/* Central Records Table */}
       <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-gray-100 dark:border-slate-800 shadow-sm space-y-4">
-        <div className="flex items-center justify-between border-b border-gray-100 dark:border-slate-800 pb-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 dark:border-slate-800 pb-3">
           <h3 className="text-sm font-bold text-gray-800 dark:text-slate-200 font-display uppercase tracking-wider flex items-center gap-2">
             <span>Material Transfer Registry</span>
             <span className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-[10px] font-mono px-2 py-0.5 rounded-full font-bold">
               {filteredMovements.length} Entries
             </span>
           </h3>
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider font-mono">
+              Method:
+            </label>
+            <select
+              value={methodFilter}
+              onChange={(e) => setMethodFilter(e.target.value)}
+              className="bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 border border-gray-200 dark:border-slate-800 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-smei-crimson cursor-pointer font-medium"
+            >
+              <option value="All">All Methods</option>
+              <option value="Export for recovery">Export for recovery</option>
+              <option value="Disposal">Disposal</option>
+              <option value="Recycling/Recovery">Recycling/Recovery</option>
+            </select>
+          </div>
         </div>
 
         <div className="border border-gray-100 dark:border-slate-800 rounded-xl overflow-hidden shadow-xs">
@@ -857,7 +882,7 @@ export default function WasteMovementModule() {
                     className="py-3 px-4 font-display cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-900 transition-colors"
                   >
                     <div className="flex items-center gap-1">
-                      <span>RC Number</span>
+                      <span>Recycle Number</span>
                       {sortField === "rcNo" && (sortDirection === "asc" ? <ArrowUp className="w-3 h-3 text-smei-crimson" /> : <ArrowDown className="w-3 h-3 text-smei-crimson" />)}
                     </div>
                   </th>
@@ -905,11 +930,26 @@ export default function WasteMovementModule() {
                             {rec.rcNo}
                           </span>
                         </td>
-                        <td className="py-3 px-4 text-gray-800 dark:text-slate-200 truncate max-w-[200px]" title={methodsStr}>
-                          {methodsStr}
+                        <td className="py-3 px-4">
+                          <div className="flex flex-wrap gap-1">
+                            {uniqueMethods.map((m) => (
+                              <span
+                                key={m}
+                                className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold tracking-wide border ${
+                                  m === "Export for recovery"
+                                    ? "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800"
+                                    : m === "Disposal"
+                                    ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800"
+                                    : "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800"
+                                }`}
+                              >
+                                {m}
+                              </span>
+                            ))}
+                          </div>
                         </td>
                         <td className="py-3 px-4 font-mono text-right font-bold text-slate-700 dark:text-slate-300">
-                          {Number(rec.totalQty || 0).toFixed(4)}
+                          {rec.totalQty.toFixed(4)}
                         </td>
                         <td className="py-3 px-4 text-slate-500 dark:text-slate-400 truncate max-w-[150px]" title={rec.sourceFileName}>
                           <span className="flex items-center gap-1">
@@ -951,186 +991,7 @@ export default function WasteMovementModule() {
         </div>
       </div>
 
-      {/* Workspace Display below the Table */}
-      {selectedRecord ? (
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
-          
-          {/* Left Block: Details Panel (5 Columns) */}
-          <div className="xl:col-span-5 bg-white dark:bg-slate-900 rounded-xl border border-gray-100 dark:border-slate-800 shadow-sm p-5 space-y-5">
-            <div className="flex items-center justify-between border-b border-gray-100 dark:border-slate-800 pb-3">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-800 dark:text-slate-200 font-display flex items-center gap-2">
-                <ClipboardList className="w-4 h-4 text-smei-crimson" />
-                <span>Selected Record Details</span>
-              </h3>
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => handleEditRecord(selectedRecord)}
-                  className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 rounded-md transition-all flex items-center gap-1 cursor-pointer"
-                >
-                  <Edit className="w-3 h-3" />
-                  <span>Edit</span>
-                </button>
-              </div>
-            </div>
 
-            {/* Grid of Key Info */}
-            <div className="grid grid-cols-2 gap-4 bg-slate-50/50 dark:bg-slate-950/40 p-4 rounded-xl border border-gray-100/60 dark:border-slate-800/60 text-xs">
-              <div>
-                <span className="text-[10px] text-gray-400 dark:text-slate-500 block uppercase font-mono">Transport Date</span>
-                <span className="font-semibold text-slate-800 dark:text-slate-200 mt-0.5 block">{selectedRecord.transportDate}</span>
-              </div>
-              <div>
-                <span className="text-[10px] text-gray-400 dark:text-slate-500 block uppercase font-mono">CRD Number</span>
-                <span className="font-bold text-smei-crimson dark:text-rose-400 mt-0.5 block">{selectedRecord.crdNo}</span>
-              </div>
-              <div>
-                <span className="text-[10px] text-gray-400 dark:text-slate-500 block uppercase font-mono">RC Number</span>
-                <span className="font-semibold text-slate-800 dark:text-slate-200 mt-0.5 block">{selectedRecord.rcNo}</span>
-              </div>
-              <div>
-                <span className="text-[10px] text-gray-400 dark:text-slate-500 block uppercase font-mono">Grand Total</span>
-                <span className="font-bold text-emerald-600 dark:text-emerald-400 mt-0.5 block">{Number(selectedRecord.totalQty || 0).toFixed(4)} MT</span>
-              </div>
-            </div>
-
-            {/* Document Reference Box */}
-            <div className="border border-blue-100/60 dark:border-slate-800/80 bg-blue-50/10 dark:bg-blue-950/5 p-3 rounded-lg flex items-center gap-3">
-              <FileText className="w-8 h-8 text-blue-500 shrink-0" />
-              <div className="text-left truncate">
-                <span className="text-[10px] text-slate-400 dark:text-slate-500 block font-mono">ATTACHED SOURCE FILE</span>
-                <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 block truncate" title={selectedRecord.sourceFileName}>
-                  {selectedRecord.sourceFileName}
-                </span>
-              </div>
-            </div>
-
-            {/* Dynamic Methods Sub-Table */}
-            <div className="space-y-2">
-              <span className="text-[10px] text-gray-400 dark:text-slate-500 block uppercase font-mono tracking-widest font-bold">Dynamic Method Allocation</span>
-              <div className="border border-gray-100 dark:border-slate-800 rounded-lg overflow-hidden">
-                <table className="w-full text-left text-[11px]">
-                  <thead>
-                    <tr className="bg-slate-100/70 dark:bg-slate-950 border-b border-gray-100 dark:border-slate-800 font-bold text-slate-500">
-                      <th className="p-2.5">Method</th>
-                      <th className="p-2.5 text-right">Qty (MT)</th>
-                      <th className="p-2.5">Destination</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100 dark:divide-slate-800/80 text-slate-700 dark:text-slate-300">
-                    {(selectedRecord.methods || []).map((m, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-slate-950/20">
-                        <td className="p-2.5 font-medium">{m.method}</td>
-                        <td className="p-2.5 font-mono text-right font-bold text-slate-800 dark:text-white">{Number(m.quantity || 0).toFixed(4)}</td>
-                        <td className="p-2.5 truncate max-w-[120px]" title={m.destination}>{m.destination}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* Signature Preview */}
-            <div className="grid grid-cols-2 gap-4 bg-slate-50/30 dark:bg-slate-950/10 p-3 rounded-lg border border-dashed border-gray-200 dark:border-slate-800 text-[11px] text-gray-600 dark:text-slate-400">
-              <div>
-                <span className="text-[9px] uppercase font-bold text-gray-400 block tracking-wide">Signed By (PCO)</span>
-                <span className="font-semibold block mt-0.5 truncate">{selectedRecord.signedBy}</span>
-              </div>
-              <div>
-                <span className="text-[9px] uppercase font-bold text-gray-400 block tracking-wide">Noted By (Asst Admin)</span>
-                <span className="font-semibold block mt-0.5 truncate">{selectedRecord.notedBy}</span>
-              </div>
-            </div>
-
-          </div>
-
-          {/* Right Block: Live Layout Preview Tab (7 Columns) */}
-          <div className="xl:col-span-7 bg-white dark:bg-slate-900 rounded-xl border border-gray-100 dark:border-slate-800 shadow-sm overflow-hidden flex flex-col">
-            
-            {/* Header Tabs */}
-            <div className="bg-slate-50 dark:bg-slate-950 border-b border-gray-100 dark:border-slate-800 px-4 py-2.5 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-1 p-0.5 bg-gray-200/50 dark:bg-slate-900 rounded-lg">
-                <button
-                  onClick={() => setActiveTab("details")}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-md flex items-center gap-1.5 transition-all cursor-pointer ${
-                    activeTab === "details"
-                      ? "bg-white dark:bg-slate-800 text-gray-800 dark:text-white shadow-xs"
-                      : "text-slate-500 hover:text-slate-700 dark:text-slate-400"
-                  }`}
-                >
-                  <Eye className="w-3.5 h-3.5" />
-                  <span>Workspace Summary</span>
-                </button>
-                <button
-                  onClick={() => setActiveTab("preview")}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-md flex items-center gap-1.5 transition-all cursor-pointer ${
-                    activeTab === "preview"
-                      ? "bg-white dark:bg-slate-800 text-gray-800 dark:text-white shadow-xs"
-                      : "text-slate-500 hover:text-slate-700 dark:text-slate-400"
-                  }`}
-                >
-                  <FileSpreadsheet className="w-3.5 h-3.5" />
-                  <span>Live Excel Sheet Preview</span>
-                </button>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handleExportExcel(selectedRecord)}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold h-[34px] px-3.5 rounded-lg flex items-center gap-1.5 transition-all shadow-xs cursor-pointer hover:scale-[1.02]"
-                >
-                  <FileSpreadsheet className="w-4 h-4" />
-                  <span>Export Excel</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Tab content */}
-            <div className="p-5 flex-1 min-h-[400px]">
-              {activeTab === "details" ? (
-                <div className="flex flex-col items-center justify-center text-center py-20 text-slate-400 space-y-3 h-full">
-                  <ClipboardList className="w-12 h-12 text-smei-crimson opacity-30 animate-pulse" />
-                  <p className="text-xs max-w-sm">
-                    This workspace shows a dynamic structured summary of movement logs. Click "Live Excel Sheet Preview" to see the final high-fidelity Excel sheet layout.
-                  </p>
-                </div>
-              ) : (
-                <div className="w-full space-y-4">
-                  <div className="flex justify-between items-center bg-gray-50 dark:bg-slate-950 p-2.5 rounded-lg border border-gray-100 dark:border-slate-800/80 shadow-xs">
-                    <span className="text-[9px] font-mono text-gray-400 dark:text-slate-500">
-                      Preserved spreadsheet layout: WASTE_MOVEMENT_TEMPLATE.xlsm (APC CAV 3 07-16)
-                    </span>
-                    {isPreviewLoading && (
-                      <span className="text-[10px] text-smei-crimson font-bold font-mono animate-pulse">
-                        Syncing...
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="bg-white p-4 rounded-xl border border-gray-200/80 shadow-xs overflow-x-auto min-h-[350px] flex justify-center">
-                    {previewHtml ? (
-                      <div 
-                        className="excel-preview-container select-none scale-[0.80] lg:scale-[0.90] origin-top" 
-                        dangerouslySetInnerHTML={{ __html: previewHtml }} 
-                      />
-                    ) : (
-                      <div className="flex flex-col items-center justify-center text-gray-400 dark:text-slate-500 gap-2 h-48 w-full">
-                        <Eye className="w-10 h-10 opacity-30 animate-pulse text-smei-crimson" />
-                        <p className="text-xs">Generating layout-preserving spreadsheet view...</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-
-          </div>
-
-        </div>
-      ) : (
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-gray-100 dark:border-slate-800 shadow-sm py-20 text-center text-slate-400 text-xs">
-          Select or create a waste movement transaction to begin the document-based workflow.
-        </div>
-      )}
 
       {/* Interactive Form Modal */}
       {isModalOpen && (
@@ -1262,7 +1123,7 @@ export default function WasteMovementModule() {
                       required
                       placeholder="e.g. CRD-06-1309-26"
                       value={formCrdNo}
-                      onChange={(e) => setFormCrdNo(e.target.value)}
+                      onChange={(e) => setFormCrdNo(e.target.value.toUpperCase())}
                       className={`w-full bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 border rounded-lg p-2.5 focus:outline-none focus:ring-1 focus:ring-smei-crimson font-mono ${
                         formCrdNo && !validateCrdNumber(formCrdNo)
                           ? "border-amber-400 dark:border-amber-500"
@@ -1273,7 +1134,7 @@ export default function WasteMovementModule() {
 
                   <div>
                     <label className="block text-[10px] font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                      RC Number (RC No.) *
+                      Recycle Number: *
                     </label>
                     <input
                       type="text"
@@ -1281,7 +1142,7 @@ export default function WasteMovementModule() {
                       required={formRcNo !== "N/A"}
                       placeholder={formRcNo === "N/A" ? "Auto set to N/A (Disposal/Recycle not added)" : "e.g. RC-2026-T1"}
                       value={formRcNo}
-                      onChange={(e) => setFormRcNo(e.target.value)}
+                      onChange={(e) => setFormRcNo(e.target.value.toUpperCase())}
                       className="w-full bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 border border-gray-200 dark:border-slate-800 text-xs rounded-lg p-2.5 focus:outline-none focus:ring-1 focus:ring-smei-crimson font-mono disabled:opacity-50"
                     />
                   </div>
@@ -1369,7 +1230,7 @@ export default function WasteMovementModule() {
                           <tr key={idx}>
                             <td className="p-2 font-medium">{m.method}</td>
                             <td className="p-2 text-right font-mono font-bold text-slate-700 dark:text-slate-300">
-                              {Number(m.quantity || 0).toFixed(4)}
+                              {m.quantity.toFixed(4)}
                             </td>
                             <td className="p-2 truncate max-w-[150px]">{m.destination}</td>
                             <td className="p-2 text-center">
@@ -1391,7 +1252,7 @@ export default function WasteMovementModule() {
                     <div className="p-2.5 bg-slate-50 dark:bg-slate-950 text-right border-t border-gray-100 dark:border-slate-800 font-mono font-bold flex justify-between items-center text-xs">
                       <span className="text-gray-400 font-sans font-semibold">Grand Total:</span>
                       <span className="text-emerald-600 dark:text-emerald-400">
-                        {Number(formMethods.reduce((sum, m) => sum + Number(m.quantity || 0), 0)).toFixed(4)} MT
+                        {formMethods.reduce((sum, m) => sum + m.quantity, 0).toFixed(4)} MT
                       </span>
                     </div>
                   </div>

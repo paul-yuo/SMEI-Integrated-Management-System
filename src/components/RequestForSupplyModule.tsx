@@ -163,7 +163,7 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
       setDepartment(req.department);
       setDepartmentOthers(req.departmentOthers || "");
       setControlNumber(req.controlNumber);
-      setPurchaseOrderNumber(req.purchaseOrderNumber || "");
+      setPurchaseOrderNumber((req.purchaseOrderNumber || "").toUpperCase());
       setStatus(req.status);
       setModeOfRequest(req.modeOfRequest);
       setPurpose(req.purpose);
@@ -366,8 +366,28 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
     }
   };
 
+  const validateRFSExport = (req: RequestForSupply): boolean => {
+    const isComplete = req.status === "Complete";
+    const hasDueDate = Boolean(req.dueDate && req.dueDate.trim() !== "");
+
+    if (!isComplete && !hasDueDate) {
+      alert("Cannot export RFS. Status must be 'Complete' and Due Date must be set before exporting.");
+      return false;
+    }
+    if (!isComplete) {
+      alert(`Cannot export RFS. Status must be 'Complete' before exporting (Current status: '${req.status || "Incomplete"}'). Please complete the RFS approval first.`);
+      return false;
+    }
+    if (!hasDueDate) {
+      alert("Cannot export RFS. Due Date is missing. Please set the Due Date in RFS Approval before exporting.");
+      return false;
+    }
+    return true;
+  };
+
   // Template-based Export
   const handleExport = async (req: RequestForSupply, format: "word" | "excel") => {
+    if (!validateRFSExport(req)) return;
     const formattedRFS = formatRFSNo(req.rfsNumber, req.dateRequested);
     const exportData = {
       RFS_NO: formattedRFS,
@@ -431,6 +451,7 @@ const handleExportExcel = async () => {
 
   const handleTriggerPDFExport = async () => {
     if (selectedRFS) {
+      if (!validateRFSExport(selectedRFS)) return;
       try {
         const { printDocument } = await import("../utils/printDocument");
         await printDocument("rfs", selectedRFS);
@@ -525,7 +546,7 @@ const handleExportExcel = async () => {
                         placeholder="e.g. PO-26-005"
                         className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson font-mono"
                         value={purchaseOrderNumber}
-                        onChange={(e) => setPurchaseOrderNumber(e.target.value)}
+                        onChange={(e) => setPurchaseOrderNumber(e.target.value.toUpperCase())}
                       />
                     </div>
 

@@ -16,6 +16,7 @@ interface ManifestSummary {
 }
 
 export default function ManifestSummaryModule() {
+  const [selectedManifestId, setSelectedManifestId] = useState<string | null>(null);
   const [manifests, setManifests] = useState<ManifestSummary[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("All");
@@ -371,9 +372,19 @@ export default function ManifestSummaryModule() {
         {/* Live Manifest Grid Directory */}
         <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-gray-100 dark:border-slate-800 shadow-sm lg:col-span-2 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 dark:border-slate-800 pb-3">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-gray-800 dark:text-slate-200 font-display flex items-center gap-2">
-              <span>Manifest Compliance Registry</span>
-            </h3>
+            <div className="flex items-center gap-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-gray-800 dark:text-slate-200 font-display flex items-center gap-2">
+                <span>Manifest Compliance Registry</span>
+              </h3>
+              {selectedManifestId && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold text-gray-500 uppercase font-mono tracking-wider">Selected:</span>
+                  <span className="text-[11px] font-bold font-mono text-smei-crimson bg-red-50 border border-red-200 px-2.5 py-1 rounded-md">
+                    {manifests.find(m => m.id === selectedManifestId)?.manifestNo || ""}
+                  </span>
+                </div>
+              )}
+            </div>
 
             {/* Reset */}
             <button 
@@ -444,7 +455,15 @@ export default function ManifestSummaryModule() {
                       };
 
                       return (
-                        <tr key={m.id} className="hover:bg-red-600/5 dark:hover:bg-red-600/10 transition-colors bg-white dark:bg-slate-900">
+                        <tr 
+                          key={m.id} 
+                          onClick={() => setSelectedManifestId(m.id)}
+                          className={`hover:bg-red-600/5 dark:hover:bg-red-600/10 transition-colors cursor-pointer select-none ${
+                            selectedManifestId === m.id
+                              ? "bg-red-600/10 border-l-4 border-l-smei-crimson font-medium"
+                              : "bg-white dark:bg-slate-900"
+                          }`}
+                        >
                           <td className="py-3 px-3 font-bold text-slate-800 dark:text-white select-all">{m.manifestNo}</td>
                           <td className="py-3 px-3 select-all text-gray-500 dark:text-slate-400">{m.controlNo}</td>
                           <td className="py-3 px-3 font-sans text-gray-700 dark:text-slate-200">

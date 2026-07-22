@@ -193,15 +193,18 @@ export function validatePlaceholders(
   return warnings;
 }
 
-// Generate Docx Blob with exact same core engine
-export async function generateDocxBlob(
-  templateName: string,
-  data: Record<string, any>
-): Promise<{ blob: Blob; warnings: string[] }> {
-  const templatePath = `/templates/${templateName}`;
-  console.log(`[Runtime Template Load] Loading DOCX template from path: ${templatePath}`);
-  const fetchUrl = `${templatePath}?t=${Date.now()}`;
+const templateCache = new Map<string, ArrayBuffer>();
 
+async function fetchTemplateCached(templateName: string): Promise<ArrayBuffer> {
+  const templatePath = `/templates/${templateName}`;
+  const cached = templateCache.get(templatePath);
+  if (cached) {
+    console.log(`[Template Cache] Serving cached template for: ${templatePath}`);
+    return cached.slice(0);
+  }
+
+  console.log(`[Runtime Template Load] Fetching template from path: ${templatePath}`);
+  const fetchUrl = `${templatePath}?t=${Date.now()}`;
   const response = await fetch(fetchUrl, { cache: "no-store" });
   const contentType = response.headers.get("content-type") || "";
 
@@ -210,12 +213,22 @@ export async function generateDocxBlob(
   }
 
   const arrayBuffer = await response.arrayBuffer();
-  // Check magic bytes PK to prevent cryptic PizZip errors
+  // Check magic bytes PK to prevent cryptic loading errors
   const bytes = new Uint8Array(arrayBuffer.slice(0, 4));
   if (bytes[0] !== 0x50 || bytes[1] !== 0x4B) {
     throw new Error(`Invalid file format for template '${templateName}'. Expected a valid Office/ZIP document but received invalid binary.`);
   }
 
+  templateCache.set(templatePath, arrayBuffer);
+  return arrayBuffer.slice(0);
+}
+
+// Generate Docx Blob with exact same core engine
+export async function generateDocxBlob(
+  templateName: string,
+  data: Record<string, any>
+): Promise<{ blob: Blob; warnings: string[] }> {
+  const arrayBuffer = await fetchTemplateCached(templateName);
   const zip = new PizZip(arrayBuffer);
 
   // Apply XML level corrections
@@ -653,23 +666,7 @@ export async function generateXlsxBlob(
   itemsKey: string,
   items: any[]
 ): Promise<{ blob: Blob; html: string; warnings: string[] }> {
-  const templatePath = `/templates/${templateName}`;
-  console.log(`[Runtime Template Load] Loading XLSX template from path: ${templatePath}`);
-  const fetchUrl = `${templatePath}?t=${Date.now()}`;
-
-  const response = await fetch(fetchUrl, { cache: "no-store" });
-  const contentType = response.headers.get("content-type") || "";
-
-  if (!response.ok || contentType.includes("text/html")) {
-    throw new Error(`Unable to load template directly from '${templatePath}'. Server returned error or HTML fallback instead of binary. Please verify public/templates/ directory.`);
-  }
-
-  const arrayBuffer = await response.arrayBuffer();
-  // Check magic bytes PK to prevent cryptic loading errors
-  const bytes = new Uint8Array(arrayBuffer.slice(0, 4));
-  if (bytes[0] !== 0x50 || bytes[1] !== 0x4B) {
-    throw new Error(`Invalid file format for template '${templateName}'. Expected a valid Office/ZIP document but received invalid binary.`);
-  }
+  const arrayBuffer = await fetchTemplateCached(templateName);
 
   if (
     templateName === "PIS_TEMPLATE.xlsm" ||
@@ -677,7 +674,8 @@ export async function generateXlsxBlob(
     templateName === "HAZWASTE_TEMPLATE.xlsm" ||
     templateName === "UNLOADING_LOADING_TEMPLATE.xlsm" ||
     templateName === "TIME_STAMP_TEMPLATE.xlsm" ||
-    templateName === "WASTE_MOVEMENT_TEMPLATE.xlsm"
+    templateName === "WASTE_MOVEMENT_TEMPLATE.xlsm" ||
+    templateName === "PO_TEMPLATE.xlsm"
   ) {
     console.log(`[PizZip High-Fidelity Bypass] Handling ${templateName} via direct XML/ZIP manipulation.`);
     const originalZip = new PizZip(arrayBuffer);
@@ -1044,6 +1042,8 @@ export async function generateXlsxBlob(
       let workbookRelsXml = originalZip.file("xl/_rels/workbook.xml.rels")?.asText() || "";
       workbookRelsXml = workbookRelsXml.replace(/<Relationship[^>]+Type="[^"]+calcChain"[^>]*\/>/g, "");
       originalZip.file("xl/_rels/workbook.xml.rels", workbookRelsXml);
+    } else if (templateName === "PO_TEMPLATE.xlsm") {
+      sharedStringsXml = replacePlaceholdersInSharedStrings(sharedStringsXml, data);
     } else {
       // RFS_TEMPLATE.xlsm
       // We substitute Item 1 in shared strings
@@ -1837,37 +1837,25 @@ function convertExcelToHtml(workbook: ExcelJS.Workbook): string {
 // ==========================================
 
 function replacePlaceholdersInSharedStrings(sharedStringsXml: string, data: Record<string, any>): string {
-  return sharedStringsXml.replace(/\{\{([^{}]+)\}\}/g, (match, key) => {
+  const replacer = (match: string, key: string) => {
     const trimmedKey = key.trim();
-    // Try exact trimmed key
-    if (data[trimmedKey] !== undefined) {
-      return escapeXml(String(data[trimmedKey]));
-    }
-    // Try uppercase trimmed key
+    if (data[trimmedKey] !== undefined) return escapeXml(String(data[trimmedKey]));
     const upperKey = trimmedKey.toUpperCase();
-    if (data[upperKey] !== undefined) {
-      return escapeXml(String(data[upperKey]));
-    }
-    // Try replacing space with underscore
+    if (data[upperKey] !== undefined) return escapeXml(String(data[upperKey]));
     const snakeKey = trimmedKey.replace(/\s+/g, "_");
-    if (data[snakeKey] !== undefined) {
-      return escapeXml(String(data[snakeKey]));
-    }
+    if (data[snakeKey] !== undefined) return escapeXml(String(data[snakeKey]));
     const upperSnakeKey = snakeKey.toUpperCase();
-    if (data[upperSnakeKey] !== undefined) {
-      return escapeXml(String(data[upperSnakeKey]));
-    }
-    // Try replacing underscore with space
+    if (data[upperSnakeKey] !== undefined) return escapeXml(String(data[upperSnakeKey]));
     const spaceKey = trimmedKey.replace(/_/g, " ");
-    if (data[spaceKey] !== undefined) {
-      return escapeXml(String(data[spaceKey]));
-    }
+    if (data[spaceKey] !== undefined) return escapeXml(String(data[spaceKey]));
     const upperSpaceKey = spaceKey.toUpperCase();
-    if (data[upperSpaceKey] !== undefined) {
-      return escapeXml(String(data[upperSpaceKey]));
-    }
-    return ""; // Empty string for unresolved placeholders
-  });
+    if (data[upperSpaceKey] !== undefined) return escapeXml(String(data[upperSpaceKey]));
+    return match; // Return original if not matched to prevent clearing static bracketed text
+  };
+
+  let result = sharedStringsXml.replace(/\{\{([^{}]+)\}\}/g, replacer);
+  result = result.replace(/\{([^{}]+)\}/g, replacer);
+  return result;
 }
 
 function injectCellValue(sheetXml: string, cellRef: string, val: any, isString: boolean = false): string {

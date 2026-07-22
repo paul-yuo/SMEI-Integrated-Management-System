@@ -149,7 +149,29 @@ export default function RfsApprovalModule({ currentUser }: RfsApprovalModuleProp
     }
   };
 
+  const validateRFSExport = (req: RequestForSupply): boolean => {
+    const isComplete = req.status === "Complete";
+    const hasDueDate = Boolean(req.dueDate && req.dueDate.trim() !== "");
+
+    if (!isComplete && !hasDueDate) {
+      alert("Cannot export RFS. Status must be 'Complete' and Due Date must be set before exporting.");
+      return false;
+    }
+    if (!isComplete) {
+      alert(`Cannot export RFS. Status must be 'Complete' before exporting (Current status: '${req.status || "Incomplete"}'). Please set status to 'Complete'.`);
+      return false;
+    }
+    if (!hasDueDate) {
+      alert("Cannot export RFS. Due Date is missing. Please set the Due Date before exporting.");
+      return false;
+    }
+    return true;
+  };
+
   const handleExport = async (req: RequestForSupply, format: "word" | "excel") => {
+    if (!validateRFSExport(req)) {
+      return;
+    }
     try {
       const formattedRFS = formatRFSNo(req.rfsNumber, req.dateRequested);
       const exportData = {
@@ -209,6 +231,9 @@ export default function RfsApprovalModule({ currentUser }: RfsApprovalModuleProp
 
   const handleTriggerPDFExport = async () => {
     if (selectedRFS) {
+      if (!validateRFSExport(selectedRFS)) {
+        return;
+      }
       try {
         const { printDocument } = await import("../utils/printDocument");
         await printDocument("rfs", selectedRFS);
@@ -243,18 +268,30 @@ export default function RfsApprovalModule({ currentUser }: RfsApprovalModuleProp
             </div>
           )}
           <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
-            <ExportExcelButton
-              onClick={() => {
-                if (selectedRFS) {
-                  handleExport(selectedRFS, "excel");
-                }
-              }}
-              disabled={!selectedRFS}
-            />
-            <ExportPdfButton
-              onClick={handleTriggerPDFExport}
-              disabled={!selectedRFS}
-            />
+            {(() => {
+              const isExportable = Boolean(
+                selectedRFS &&
+                selectedRFS.status === "Complete" &&
+                selectedRFS.dueDate &&
+                selectedRFS.dueDate.trim() !== ""
+              );
+              return (
+                <>
+                  <ExportExcelButton
+                    onClick={() => {
+                      if (selectedRFS) {
+                        handleExport(selectedRFS, "excel");
+                      }
+                    }}
+                    disabled={!isExportable}
+                  />
+                  <ExportPdfButton
+                    onClick={handleTriggerPDFExport}
+                    disabled={!isExportable}
+                  />
+                </>
+              );
+            })()}
           </div>
         </div>
 
@@ -463,7 +500,7 @@ export default function RfsApprovalModule({ currentUser }: RfsApprovalModuleProp
                   <div className="pt-4 flex justify-end gap-2 border-t border-gray-100">
                     <button
                       type="button"
-                      onClick={() => handleExport(selectedRFS, "excel")}
+                      onClick={() => handleExport(currentRFSData || selectedRFS, "excel")}
                       className="mr-auto px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-all font-semibold shadow flex items-center gap-1.5 text-xs"
                     >
                       <FileSpreadsheet className="w-4 h-4" /> Export Excel

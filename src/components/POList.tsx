@@ -7,9 +7,9 @@ import React, { useState, useEffect, useMemo } from "react";
 import { PurchaseOrder, Supplier, User, UserRole } from "../types";
 import { Search, Plus, Filter, Calendar, FileText, ArrowUpDown, Trash2, Edit3, Eye, Printer, FileSpreadsheet, Download } from "lucide-react";
 import { ExcelTemplateDownloadButton, exportPOToExcel } from "./ExcelIO";
-import { exportPOToWord } from "../utils/wordExport";
+import { exportPOToWord, exportPOToXLSM } from "../utils/wordExport";
 import { TableSkeleton } from "./ui/Skeleton";
-import { ExportWordButton, ExportPdfButton } from "./SharedButtons";
+import { ExportExcelButton, ExportWordButton, ExportPdfButton } from "./SharedButtons";
 import DeleteConfirmationModal from "./DeleteConfirmationModal";
 
 interface POListProps {
@@ -108,9 +108,9 @@ const PORow = React.memo(({
           </button>
 
           <button
-            onClick={() => exportPOToExcel(po)}
+            onClick={() => exportPOToXLSM(po)}
             className="p-1.5 hover:bg-green-50 hover:text-green-600 text-gray-400 hover:text-green-600 rounded-lg transition-all"
-            title="Export Single PO to Excel"
+            title="Export Single PO to Excel (.XLSM)"
           >
             <FileSpreadsheet className="w-4 h-4" />
           </button>
@@ -212,6 +212,15 @@ export default function POList({
     Closed: "bg-blue-50 text-blue-700 border-blue-200",
   };
 
+  const handleExportExcel = async () => {
+    const targetPO = pos.find((p) => p.id === selectedPOId);
+    if (targetPO) {
+      await exportPOToXLSM(targetPO);
+    } else {
+      alert("Please select a purchase order first.");
+    }
+  };
+
   const handleExportAll = async () => {
     const targetPO = pos.find((p) => p.id === selectedPOId);
     if (targetPO) {
@@ -256,6 +265,10 @@ export default function POList({
           )}
 
           <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
+            <ExportExcelButton
+              onClick={handleExportExcel}
+              disabled={!selectedPOId}
+            />
             <ExportWordButton
               onClick={handleExportAll}
               disabled={!selectedPOId || isExporting}

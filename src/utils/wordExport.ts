@@ -2,7 +2,7 @@ import PizZip from "pizzip";
 import Docxtemplater from "docxtemplater";
 import { saveAs } from "file-saver";
 import { PurchaseOrder } from "../types";
-import { exportWordWithTemplate } from "./templateExport";
+import { exportWordWithTemplate, exportExcelWithTemplate } from "./templateExport";
 import { formatRFSNo } from "./templateMapping";
 
 // Reusable currency helper supporting dynamic currency symbols and preventing cell wrapping
@@ -385,4 +385,31 @@ export const exportPOToWord = async (po: PurchaseOrder) => {
     exportData,
     `${po.poNumber}_SMEI_PO.docx`
   );
+};
+
+export const exportPOToXLSM = async (po: PurchaseOrder) => {
+  if (!po) {
+    alert("No Purchase Order data provided.");
+    return;
+  }
+  const errors: string[] = [];
+  if (!po.poNumber) errors.push("P.O. Number is required.");
+  if (!po.poDate) errors.push("P.O. Date is required.");
+  if (!po.deliveryDate) errors.push("Delivery Date is required.");
+  if (!po.supplierName) errors.push("Supplier Name is required.");
+
+  if (errors.length > 0) {
+    alert(`Cannot export Purchase Order due to validation errors:\n\n${errors.map(e => `• ${e}`).join("\n")}`);
+    return;
+  }
+
+  try {
+    const { mapPOData } = await import("./templateMapping");
+    const mapped = mapPOData(po);
+    const poNo = (po.poNumber || "PO").toUpperCase();
+    await exportExcelWithTemplate("PO_TEMPLATE.xlsm", mapped, "items", mapped.items || [], `${poNo}_SMEI_PO.xlsm`);
+  } catch (err: any) {
+    console.error("Export PO XLSM Error:", err);
+    alert(err.message || "Failed to export Purchase Order to XLSM template.");
+  }
 };

@@ -39,7 +39,7 @@ export default function EnterprisePortalBackground() {
           enabled: true,
         },
         {
-          color: "#F8FAFC",
+          color: "#ffffff",
           enabled: true,
         },
       ],
@@ -47,7 +47,7 @@ export default function EnterprisePortalBackground() {
       /*
        * Animation
        */
-      speed: 2.0,
+      speed: 8.0,
 
       horizontalPressure: 3,
       verticalPressure: 4,

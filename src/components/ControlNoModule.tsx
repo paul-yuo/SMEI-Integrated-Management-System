@@ -62,6 +62,7 @@ export default function ControlNoModule() {
   const [editCANumber, setEditCANumber] = useState("");
 
   // Document preview state
+  const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [previewDoc, setPreviewDoc] = useState<UploadedDocument | null>(null);
   const [activeDocData, setActiveDocData] = useState<string>("");
 
@@ -477,9 +478,19 @@ export default function ControlNoModule() {
         {/* Directory & Table */}
         <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-gray-100 dark:border-slate-800 shadow-sm space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
-            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 font-display uppercase tracking-wider">
-              Compliance Document Registry
-            </h3>
+            <div className="flex items-center gap-3">
+              <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 font-display uppercase tracking-wider">
+                Compliance Document Registry
+              </h3>
+              {selectedDocId && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold text-gray-500 uppercase font-mono tracking-wider">Selected:</span>
+                  <span className="text-[11px] font-bold font-mono text-smei-crimson bg-red-50 border border-red-200 px-2.5 py-1 rounded-md">
+                    {uploadedDocs.find(d => d.id === selectedDocId)?.caNumber || ""}
+                  </span>
+                </div>
+              )}
+            </div>
             <span className="text-[10px] font-mono text-gray-500 dark:text-slate-400 uppercase tracking-wider bg-slate-50 dark:bg-slate-950 px-2.5 py-1 rounded-full border border-slate-200 dark:border-slate-800">
               Total Count: {filteredDocs.length}
             </span>
@@ -531,9 +542,12 @@ export default function ControlNoModule() {
                   filteredDocs.map((doc, index) => (
                     <tr 
                       key={doc.id} 
+                      onClick={() => setSelectedDocId(doc.id)}
                       onDoubleClick={() => handlePreviewDoc(doc)}
                       className={`transition-colors cursor-pointer select-none ${
-                        index % 2 === 1 
+                        selectedDocId === doc.id
+                          ? "bg-red-600/10 border-l-4 border-l-smei-crimson font-medium"
+                          : index % 2 === 1 
                           ? "bg-slate-50/30 dark:bg-slate-900/40 hover:bg-red-600/5 dark:hover:bg-red-600/10" 
                           : "bg-white dark:bg-slate-900 hover:bg-red-600/5 dark:hover:bg-red-600/10"
                       }`}

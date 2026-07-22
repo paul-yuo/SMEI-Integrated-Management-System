@@ -197,7 +197,7 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
     if (slip) {
       setSelectedSlip(slip);
       setIsEditMode(edit);
-      setPisNumber(slip.pisNumber);
+      setPisNumber((slip.pisNumber || "").toUpperCase());
       setScheduleDate(slip.scheduleDate);
       setScheduleTime(slip.scheduleTime);
       setAmpm(slip.ampm);
@@ -719,7 +719,7 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
                           errors.pisNumber ? "border-rose-500 bg-rose-50/20" : "border-gray-200 bg-gray-50"
                         }`}
                         value={pisNumber}
-                        onChange={(e) => setPisNumber(e.target.value)}
+                        onChange={(e) => setPisNumber(e.target.value.toUpperCase())}
                         placeholder="PURC-PIS-YY-###"
                       />
                       {errors.pisNumber && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.pisNumber}</p>}
