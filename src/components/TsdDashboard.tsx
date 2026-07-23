@@ -103,15 +103,6 @@ export default function TsdDashboard({ onNavigate }: TsdDashboardProps) {
       color: "border-l-teal-500",
       iconColor: "text-teal-500",
       badge: "Reports"
-    },
-    {
-      title: "TSD Facility Executive Dashboard",
-      desc: "Analyze aggregated tonnage charts, monthly treating curves, and compliance ratings.",
-      icon: TrendingUp,
-      tab: "tsd-summary",
-      color: "border-l-rose-500",
-      iconColor: "text-rose-500",
-      badge: "Analytics"
     }
   ];
 

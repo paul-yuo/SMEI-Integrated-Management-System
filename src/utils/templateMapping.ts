@@ -193,6 +193,7 @@ export function mapPOData(po: PurchaseOrder): Record<string, any> {
 
     QUANTITY,
     UNIT,
+    DESCRIPTION: descLines.join("\n"),
     UNIT_PRICE,
     AMOUNT,
 
@@ -217,14 +218,20 @@ export function mapPOData(po: PurchaseOrder): Record<string, any> {
     PREPARED_BY: prepared.name,
     PREPARED_BY_POSITION: prepared.position,
     APPROVED_BY: approved.name,
+    APROVED_BY: approved.name,
     APPROVED_BY_POSITION: approved.position,
+    APROVED_BY_POSITION: approved.position,
     CHECKED_BY: checked.name,
     CHECKED_BY_POSITION: checked.position,
 
     VERIFIED_BY1,
+    VERIFIED_BY_1: VERIFIED_BY1,
     VERIFIED_BY_POSITION1,
+    VERIFIED_BY_POSITION_1: VERIFIED_BY_POSITION1,
     VERIFIED_BY2,
+    VERIFIED_BY_2: VERIFIED_BY2,
     VERIFIED_BY_POSITION2,
+    VERIFIED_BY_POSITION_2: VERIFIED_BY_POSITION2,
   };
 }
 

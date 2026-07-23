@@ -675,7 +675,8 @@ export async function generateXlsxBlob(
     templateName === "UNLOADING_LOADING_TEMPLATE.xlsm" ||
     templateName === "TIME_STAMP_TEMPLATE.xlsm" ||
     templateName === "WASTE_MOVEMENT_TEMPLATE.xlsm" ||
-    templateName === "PO_TEMPLATE.xlsm"
+    templateName === "PO_TEMPLATE.xlsm" ||
+    templateName === "WEEKLY_MANIFEST_TEMPLATE.xlsm"
   ) {
     console.log(`[PizZip High-Fidelity Bypass] Handling ${templateName} via direct XML/ZIP manipulation.`);
     const originalZip = new PizZip(arrayBuffer);
@@ -726,11 +727,21 @@ export async function generateXlsxBlob(
       // 1. Replacements in sharedStrings.xml
       sharedStringsXml = sharedStringsXml.replace(/\{\{CONTROL_NO\}\}/g, data.CONTROL_NO || data.CA_NO || "");
       sharedStringsXml = sharedStringsXml.replace(/\{\{CA_NO\}\}/g, data.CA_NO || data.CONTROL_NO || "");
-      sharedStringsXml = sharedStringsXml.replace(/\{\{SUBJECT_HEADER\}\}/g, data.SUBJECT_HEADER || "");
-      sharedStringsXml = sharedStringsXml.replace(/\{\{LOADING_TITLE\)/g, data.LOADING_TITLE || "");
-      sharedStringsXml = sharedStringsXml.replace(/\{\{UNLOADING_TITLE\)/g, data.UNLOADING_TITLE || "");
-      sharedStringsXml = sharedStringsXml.replace(/\{\{LOADING_DESCRIPTION\}\}/g, data.LOADING_DESCRIPTION || "");
-      sharedStringsXml = sharedStringsXml.replace(/\{\{UNLOADING_DESCRIPTION\}\}/g, data.UNLOADING_DESCRIPTION || "");
+      if (data.SUBJECT_HEADER !== undefined) {
+        sharedStringsXml = sharedStringsXml.replace(/\{\{SUBJECT_HEADER\}\}/g, data.SUBJECT_HEADER);
+      }
+      if (data.LOADING_TITLE !== undefined) {
+        sharedStringsXml = sharedStringsXml.replace(/\{\{LOADING_TITLE\}\}/g, data.LOADING_TITLE);
+      }
+      if (data.UNLOADING_TITLE !== undefined) {
+        sharedStringsXml = sharedStringsXml.replace(/\{\{UNLOADING_TITLE\}\}/g, data.UNLOADING_TITLE);
+      }
+      if (data.LOADING_DESCRIPTION !== undefined) {
+        sharedStringsXml = sharedStringsXml.replace(/\{\{LOADING_DESCRIPTION\}\}/g, data.LOADING_DESCRIPTION);
+      }
+      if (data.UNLOADING_DESCRIPTION !== undefined) {
+        sharedStringsXml = sharedStringsXml.replace(/\{\{UNLOADING_DESCRIPTION\}\}/g, data.UNLOADING_DESCRIPTION);
+      }
       
       // Clear the image placeholder text from displaying in cells on top of images
       sharedStringsXml = sharedStringsXml.replace(/\{\{LOADING_IMAGE\}\}/g, "");
@@ -931,23 +942,7 @@ export async function generateXlsxBlob(
       workbookRelsXml = workbookRelsXml.replace(/<Relationship[^>]+Type="[^"]+calcChain"[^>]*\/>/g, "");
       originalZip.file("xl/_rels/workbook.xml.rels", workbookRelsXml);
     } else if (templateName === "TIME_STAMP_TEMPLATE.xlsm") {
-      // 1. Process worksheet cells in sheet1.xml (since no placeholders in sharedStrings)
-      let sheet1Xml = originalZip.file("xl/worksheets/sheet1.xml")?.asText() || "";
-      if (sheet1Xml) {
-        // Inject Record ID at Cell B41
-        sheet1Xml = injectCellValue(sheet1Xml, "B41", data.ID || "", true);
-        sheet1Xml = injectCellValue(sheet1Xml, "A41", "RECORD ID:", true);
-        sheet1Xml = injectCellValue(sheet1Xml, "F41", "TIMESTAMP:", true);
-        sheet1Xml = injectCellValue(sheet1Xml, "G41", data.DATE || "", true);
-        sheet1Xml = injectCellValue(sheet1Xml, "A43", "COMPLIANCE CONTEXT NOTES & OTHER RELATED INFORMATION:", true);
-        sheet1Xml = injectCellValue(sheet1Xml, "A44", data.NOTES || "", true);
-        sheet1Xml = injectCellValue(sheet1Xml, "A46", "FILE NAME:", true);
-        sheet1Xml = injectCellValue(sheet1Xml, "C46", data.FILENAME || "", true);
-        sheet1Xml = injectCellValue(sheet1Xml, "A48", "This document serves as an official timestamp record for hazardous waste compliance auditing. The image above is a true and accurate representation of the verified operations at the specified date and time.", true);
-        sheet1Xml = injectCellValue(sheet1Xml, "A50", "SMEI HAZARDOUS WASTE MANAGEMENT SYSTEM - COMPLIANCE REGISTRY", true);
-
-        originalZip.file("xl/worksheets/sheet1.xml", sheet1Xml);
-      }
+      // 1. Leave worksheet sheet1.xml clean without injecting metadata into lower cells (rows 41-50)
 
       // 2. Inject image to xl/media/
       const FALLBACK_1X1_PNG = "iVBOR00KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
@@ -964,29 +959,53 @@ export async function generateXlsxBlob(
 
       originalZip.file("xl/media/image2.png", imgBuffer);
 
-      // 3. Create drawings relationship file: xl/drawings/_rels/drawing1.xml.rels
-      const drawingRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+      // Ensure [Content_Types].xml has PNG and JPEG image content types to prevent Excel repair warning
+      let contentTypesXml = originalZip.file("[Content_Types].xml")?.asText() || "";
+      if (contentTypesXml && !contentTypesXml.includes('Extension="png"')) {
+        contentTypesXml = contentTypesXml.replace(
+          '</Types>',
+          '  <Default Extension="png" ContentType="image/png"/>\n  <Default Extension="jpeg" ContentType="image/jpeg"/>\n  <Default Extension="jpg" ContentType="image/jpeg"/>\n</Types>'
+        );
+        originalZip.file("[Content_Types].xml", contentTypesXml);
+      }
+
+      // 3. Create or update drawings relationship file: xl/drawings/_rels/drawing1.xml.rels
+      let drawingRelsXml = originalZip.file("xl/drawings/_rels/drawing1.xml.rels")?.asText() || "";
+      if (!drawingRelsXml) {
+        drawingRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rIdImg1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image2.png"/>
 </Relationships>`;
+      } else if (!drawingRelsXml.includes('Id="rIdImg1"')) {
+        drawingRelsXml = drawingRelsXml.replace(
+          '</Relationships>',
+          '  <Relationship Id="rIdImg1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image2.png"/>\n</Relationships>'
+        );
+      }
       originalZip.file("xl/drawings/_rels/drawing1.xml.rels", drawingRelsXml);
 
-      // 4. Replace Rectangle 3 containing {{TIMESTAMP_IMAGE}} in xl/drawings/drawing1.xml with the picture anchor
+      // 4. Replace Rectangle 3 containing {{TIMESTAMP_IMAGE}} in xl/drawings/drawing1.xml with the exact original picture anchor
       let drawingXml = originalZip.file("xl/drawings/drawing1.xml")?.asText() || "";
       if (drawingXml) {
+        if (!drawingXml.includes("xmlns:r=")) {
+          drawingXml = drawingXml.replace(
+            '<xdr:wsDr ',
+            '<xdr:wsDr xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
+          );
+        }
         const imageAnchorRegex = /<xdr:twoCellAnchor>[^]*?\{\{TIMESTAMP_IMAGE\}\}[^]*?<\/xdr:twoCellAnchor>/g;
         const timestampPicAnchor = `
           <xdr:twoCellAnchor editAs="oneCell">
             <xdr:from>
               <xdr:col>0</xdr:col>
               <xdr:colOff>0</xdr:colOff>
-              <xdr:row>3</xdr:row>
-              <xdr:rowOff>0</xdr:rowOff>
+              <xdr:row>5</xdr:row>
+              <xdr:rowOff>133350</xdr:rowOff>
             </xdr:from>
             <xdr:to>
-              <xdr:col>10</xdr:col>
-              <xdr:colOff>0</xdr:colOff>
-              <xdr:row>40</xdr:row>
+              <xdr:col>9</xdr:col>
+              <xdr:colOff>723900</xdr:colOff>
+              <xdr:row>15</xdr:row>
               <xdr:rowOff>0</xdr:rowOff>
             </xdr:to>
             <xdr:pic>
@@ -1021,22 +1040,6 @@ export async function generateXlsxBlob(
     } else if (templateName === "WASTE_MOVEMENT_TEMPLATE.xlsm") {
       sharedStringsXml = replacePlaceholdersInSharedStrings(sharedStringsXml, data);
       
-      let sheet18Xml = originalZip.file("xl/worksheets/sheet18.xml")?.asText() || "";
-      if (sheet18Xml) {
-        const cleanNumeric = (val: any): any => {
-          if (val === undefined || val === null || val === "" || isNaN(Number(val))) {
-            return "";
-          }
-          return Number(val);
-        };
-        sheet18Xml = injectCellValue(sheet18Xml, "G45", cleanNumeric(data.QUANTITY_1), false);
-        sheet18Xml = injectCellValue(sheet18Xml, "G46", cleanNumeric(data.QUANTITY_2), false);
-        sheet18Xml = injectCellValue(sheet18Xml, "G47", cleanNumeric(data.QUANTITY_3), false);
-        sheet18Xml = injectCellValue(sheet18Xml, "G48", cleanNumeric(data.TOTAL_QTY), false);
-        
-        originalZip.file("xl/worksheets/sheet18.xml", sheet18Xml);
-      }
-      
       // Remove calculation chain to prevent corrupt formula chain repair warning in Excel
       originalZip.remove("xl/calcChain.xml");
       let workbookRelsXml = originalZip.file("xl/_rels/workbook.xml.rels")?.asText() || "";
@@ -1044,6 +1047,138 @@ export async function generateXlsxBlob(
       originalZip.file("xl/_rels/workbook.xml.rels", workbookRelsXml);
     } else if (templateName === "PO_TEMPLATE.xlsm") {
       sharedStringsXml = replacePlaceholdersInSharedStrings(sharedStringsXml, data);
+    } else if (templateName === "WEEKLY_MANIFEST_TEMPLATE.xlsm") {
+      const recordsForSum = (items && items.length > 0) ? items : (data._records || []);
+      if (data.TOTAL_QTY === undefined || data.TOTAL_QTY === null || data.TOTAL_QTY === "") {
+        const sumKg = recordsForSum.reduce((sum: number, rec: any) => {
+          if (rec && rec.quantity !== undefined && rec.quantity !== null && !isNaN(Number(rec.quantity))) {
+            return sum + Number(rec.quantity) * 1000;
+          }
+          return sum;
+        }, 0);
+        const formatted = Number.isInteger(sumKg)
+          ? sumKg.toLocaleString("en-US")
+          : sumKg.toLocaleString("en-US", { maximumFractionDigits: 3 });
+        data.TOTAL_QTY = formatted;
+        data.TOTAL_QUANTITY = formatted;
+        data.SUM_QTY = formatted;
+      }
+      sharedStringsXml = replacePlaceholdersInSharedStrings(sharedStringsXml, data);
+
+      // 1. Fix style 19 alignment in styles.xml (Quantity cells) to right alignment
+      let stylesXml = originalZip.file("xl/styles.xml")?.asText() || "";
+      if (stylesXml) {
+        stylesXml = stylesXml.replace(
+          `<xf numFmtId="43" fontId="14" fillId="0" borderId="0" xfId="1" applyFont="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>`,
+          `<xf numFmtId="43" fontId="14" fillId="0" borderId="0" xfId="1" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>`
+        );
+        originalZip.file("xl/styles.xml", stylesXml);
+      }
+
+      // Helper function for date formatting
+      const formatWeeklyDate = (dateStr: string | undefined | null): string => {
+        if (!dateStr || !String(dateStr).trim()) return "";
+        let str = String(dateStr).trim();
+        const matchDdMmmYy = str.match(/^(\d{1,2})[-/ ]([A-Za-z]{3})[-/ ](\d{2,4})$/);
+        if (matchDdMmmYy) {
+          const day = matchDdMmmYy[1].padStart(2, "0");
+          const m = matchDdMmmYy[2];
+          const month = m.charAt(0).toUpperCase() + m.slice(1, 3).toLowerCase();
+          const yr = matchDdMmmYy[3].slice(-2);
+          return `${day}-${month}-${yr}`;
+        }
+        const d = new Date(str);
+        if (!isNaN(d.getTime())) {
+          const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+          const day = String(d.getDate()).padStart(2, "0");
+          const month = months[d.getMonth()];
+          const year = String(d.getFullYear()).slice(-2);
+          return `${day}-${month}-${year}`;
+        }
+        return str;
+      };
+
+      // 2. Process records in sheet1.xml
+      let sheet1Xml = originalZip.file("xl/worksheets/sheet1.xml")?.asText() || "";
+      if (sheet1Xml) {
+        const records = (items && items.length > 0) ? items : (data._records || []);
+        const totalRecords = records.length;
+        const maxRow = 27 + Math.max(6, totalRecords);
+        const overflow = totalRecords > 21 ? totalRecords - 21 : 0;
+
+        if (overflow > 0) {
+          // Shift rows 49+ down by overflow
+          sheet1Xml = sheet1Xml.replace(/<row r="(\d+)"([^>]*)>/g, (match, rNumStr, rest) => {
+            const rNum = parseInt(rNumStr);
+            if (rNum >= 49) {
+              return `<row r="${rNum + overflow}"${rest}>`;
+            }
+            return match;
+          });
+
+          // Shift cell references in rows 49+
+          sheet1Xml = sheet1Xml.replace(/<c r="([A-Z]+)(\d+)"/g, (match, col, rNumStr) => {
+            const rNum = parseInt(rNumStr);
+            if (rNum >= 49) {
+              return `<c r="${col}${rNum + overflow}"`;
+            }
+            return match;
+          });
+
+          // Update SUM formula range
+          sheet1Xml = sheet1Xml.replace(/SUM\(G28:G50\)/g, `SUM(G28:G${27 + totalRecords})`);
+
+          // Update print area in workbook.xml
+          let wbXml = originalZip.file("xl/workbook.xml")?.asText() || "";
+          if (wbXml) {
+            wbXml = wbXml.replace(/\$B\$1:\$J\$60/g, `$B$1:$J$${60 + overflow}`);
+            originalZip.file("xl/workbook.xml", wbXml);
+          }
+        }
+
+        for (let r = 28; r <= maxRow; r++) {
+          const idx = r - 28;
+          const rec = records[idx];
+
+          const rowRegex = new RegExp(`<row r="${r}"[^>]*>[\\s\\S]*?<\\/row>`);
+          const rowMatch = sheet1Xml.match(rowRegex);
+
+          const comp = rec ? escapeXml(rec.companyName || "") : "";
+          const dateStr = rec ? escapeXml(formatWeeklyDate(rec.deliveryDate || rec.haulingDate || rec.transportDate)) : "";
+          const tp = rec ? escapeXml(rec.tpNumber || "") : "";
+          const ctrl = rec ? escapeXml(rec.controlNo || "") : "";
+          const mf = rec ? escapeXml(rec.manifestNo || "") : "";
+
+          let qtyXml = `<c r="G${r}" s="19" t="inlineStr"><is><t>-</t></is></c>`;
+          if (rec && rec.quantity !== undefined && rec.quantity !== null && rec.quantity !== "" && !isNaN(Number(rec.quantity))) {
+            const qtyKg = Number((Number(rec.quantity) * 1000).toFixed(3));
+            qtyXml = `<c r="G${r}" s="19"><v>${qtyKg}</v></c>`;
+          }
+
+          const newRowXml = `<row r="${r}" spans="3:47" s="1" customFormat="1" ht="60.75" customHeight="1">` +
+            `<c r="C${r}" s="15" t="s"><v>69</v></c>` + // Description fixed to "Waste Electrical & Electronic Equipment"
+            `<c r="D${r}" s="16" t="inlineStr"><is><t>${comp}</t></is></c>` +
+            `<c r="E${r}" s="17" t="inlineStr"><is><t>${dateStr}</t></is></c>` +
+            `<c r="F${r}" s="18" t="inlineStr"><is><t>${tp}</t></is></c>` +
+            `${qtyXml}` +
+            `<c r="H${r}" s="20" t="inlineStr"><is><t>${ctrl}</t></is></c>` +
+            `<c r="I${r}" s="20" t="inlineStr"><is><t>${mf}</t></is></c>` +
+            `<c r="L${r}" s="2"/><c r="M${r}" s="2"/><c r="N${r}" s="2"/>` +
+            `</row>`;
+
+          if (rowMatch) {
+            sheet1Xml = sheet1Xml.replace(rowRegex, newRowXml);
+          } else {
+            const prevRowRegex = new RegExp(`<row r="${r - 1}"[^>]*>[\\s\\S]*?<\\/row>`);
+            const prevMatch = sheet1Xml.match(prevRowRegex);
+            if (prevMatch) {
+              sheet1Xml = sheet1Xml.replace(prevRowRegex, `${prevMatch[0]}\n${newRowXml}`);
+            }
+          }
+        }
+
+        originalZip.file("xl/worksheets/sheet1.xml", sheet1Xml);
+      }
     } else {
       // RFS_TEMPLATE.xlsm
       // We substitute Item 1 in shared strings
@@ -1837,20 +1972,42 @@ function convertExcelToHtml(workbook: ExcelJS.Workbook): string {
 // ==========================================
 
 function replacePlaceholdersInSharedStrings(sharedStringsXml: string, data: Record<string, any>): string {
-  const replacer = (match: string, key: string) => {
+  const getValue = (key: string) => {
     const trimmedKey = key.trim();
-    if (data[trimmedKey] !== undefined) return escapeXml(String(data[trimmedKey]));
+    if (data[trimmedKey] !== undefined) return data[trimmedKey];
     const upperKey = trimmedKey.toUpperCase();
-    if (data[upperKey] !== undefined) return escapeXml(String(data[upperKey]));
+    if (data[upperKey] !== undefined) return data[upperKey];
     const snakeKey = trimmedKey.replace(/\s+/g, "_");
-    if (data[snakeKey] !== undefined) return escapeXml(String(data[snakeKey]));
+    if (data[snakeKey] !== undefined) return data[snakeKey];
     const upperSnakeKey = snakeKey.toUpperCase();
-    if (data[upperSnakeKey] !== undefined) return escapeXml(String(data[upperSnakeKey]));
+    if (data[upperSnakeKey] !== undefined) return data[upperSnakeKey];
     const spaceKey = trimmedKey.replace(/_/g, " ");
-    if (data[spaceKey] !== undefined) return escapeXml(String(data[spaceKey]));
+    if (data[spaceKey] !== undefined) return data[spaceKey];
     const upperSpaceKey = spaceKey.toUpperCase();
-    if (data[upperSpaceKey] !== undefined) return escapeXml(String(data[upperSpaceKey]));
-    return match; // Return original if not matched to prevent clearing static bracketed text
+    if (data[upperSpaceKey] !== undefined) return data[upperSpaceKey];
+
+    if (upperKey.includes("APROVED")) {
+      const fixedKey = upperKey.replace("APROVED", "APPROVED");
+      if (data[fixedKey] !== undefined) return data[fixedKey];
+    }
+    if (upperKey.includes("APPROVED")) {
+      const fixedKey = upperKey.replace("APPROVED", "APROVED");
+      if (data[fixedKey] !== undefined) return data[fixedKey];
+    }
+    const noNumUnderscore = upperKey.replace(/_(\d+)/g, "$1");
+    if (data[noNumUnderscore] !== undefined) return data[noNumUnderscore];
+    const withNumUnderscore = upperKey.replace(/([A-Z])(\d+)/g, "$1_$2");
+    if (data[withNumUnderscore] !== undefined) return data[withNumUnderscore];
+
+    return undefined;
+  };
+
+  const replacer = (match: string, key: string) => {
+    const val = getValue(key);
+    if (val === undefined || val === null) {
+      return "";
+    }
+    return escapeXml(String(val));
   };
 
   let result = sharedStringsXml.replace(/\{\{([^{}]+)\}\}/g, replacer);

@@ -11,6 +11,7 @@ import { exportWordWithTemplate, exportExcelWithTemplate } from "../utils/templa
 import { ExportExcelButton, CreateButton, ExportPdfButton } from "./SharedButtons";
 import { TableSkeleton } from "./ui/Skeleton";
 import { formatRFSNo } from "../utils/templateMapping";
+import { formatControlNumber } from "../utils/controlNumber";
 
 interface RFSModuleProps {
   currentUser: User;
@@ -531,7 +532,7 @@ const handleExportExcel = async () => {
                           errors.rfsNumber ? "border-rose-500 bg-rose-50/20" : "border-gray-200 bg-gray-50"
                         }`}
                         value={rfsNumber}
-                        onChange={(e) => setRfsNumber(e.target.value)}
+                        onChange={(e) => setRfsNumber(formatControlNumber(e.target.value, "rfsNumber"))}
                         placeholder="YYYY-MM-###"
                       />
                       {errors.rfsNumber && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.rfsNumber}</p>}

@@ -250,7 +250,7 @@ export default function SystemSelector({ currentUser, onSelectSystem, onLogout }
                   Environmental Logistics
                 </p>
                 <p className="text-sm text-neutral-500 dark:text-neutral-400 leading-relaxed pt-2">
-                  Access the TSD Summary Monitoring workspace. Track tracking code generator sequences, verify terminal unloading/loading logs, check the hazardous waste catalog, log internal loops, and audit compliance timestamps.
+                  Access the TSD Monitoring workspace. Track tracking code generator sequences, verify terminal unloading/loading logs, check the hazardous waste catalog, log internal loops, and audit compliance timestamps.
                 </p>
               </div>
             </div>

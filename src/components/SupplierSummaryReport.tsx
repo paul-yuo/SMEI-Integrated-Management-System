@@ -473,21 +473,36 @@ export default function SupplierSummaryReport({ pos, suppliers, currentUser }: S
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={handleExportExcel}
-            className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2.5 rounded-xl shadow-md transition-all text-sm"
+            disabled={itemsWithRunningBalance.length === 0}
+            className={`inline-flex items-center gap-2 font-semibold px-4 py-2.5 rounded-xl shadow-md transition-all text-sm whitespace-nowrap ${
+              itemsWithRunningBalance.length === 0
+                ? "bg-gray-100 dark:bg-slate-800/80 text-gray-400 dark:text-slate-500 border border-gray-200 dark:border-slate-700 cursor-not-allowed shadow-none"
+                : "bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer hover:scale-[1.02] active:scale-95 shadow-[0_2px_8px_rgba(16,185,129,0.15)]"
+            }`}
           >
             <FileSpreadsheet className="w-4 h-4" />
             <span>Export Excel</span>
           </button>
           <button
             onClick={handlePrint}
-            className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-semibold px-4 py-2.5 rounded-xl shadow-md transition-all text-sm"
+            disabled={itemsWithRunningBalance.length === 0}
+            className={`inline-flex items-center gap-2 font-semibold px-4 py-2.5 rounded-xl shadow-md transition-all text-sm whitespace-nowrap ${
+              itemsWithRunningBalance.length === 0
+                ? "bg-gray-100 dark:bg-slate-800/80 text-gray-400 dark:text-slate-500 border border-gray-200 dark:border-slate-700 cursor-not-allowed shadow-none"
+                : "bg-red-600 hover:bg-red-700 text-white cursor-pointer hover:scale-[1.02] active:scale-95"
+            }`}
           >
             <Printer className="w-4 h-4" />
             <span>Print</span>
           </button>
           <button
             onClick={() => exportReportToWord(itemsWithRunningBalance, grandTotal, currentUser.fullName)}
-            className="inline-flex items-center gap-2 bg-[#2B579A] hover:bg-[#1C3A6A] text-white font-semibold px-4 py-2.5 rounded-xl shadow-md transition-all text-sm"
+            disabled={itemsWithRunningBalance.length === 0}
+            className={`inline-flex items-center gap-2 font-semibold px-4 py-2.5 rounded-xl shadow-md transition-all text-sm whitespace-nowrap ${
+              itemsWithRunningBalance.length === 0
+                ? "bg-gray-100 dark:bg-slate-800/80 text-gray-400 dark:text-slate-500 border border-gray-200 dark:border-slate-700 cursor-not-allowed shadow-none"
+                : "bg-[#2B579A] hover:bg-[#1C3A6A] text-white cursor-pointer hover:scale-[1.02] active:scale-95"
+            }`}
           >
             <FileText className="w-4 h-4" />
             <span>Export Word</span>

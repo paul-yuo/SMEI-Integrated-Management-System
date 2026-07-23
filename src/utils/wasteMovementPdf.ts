@@ -15,33 +15,33 @@ export const WASTE_MOVEMENT_PDF_COORDINATES = {
     {
       // Row 45 (Method 1: Export for recovery)
       y: 151.0,
-      transportDateX: 74.0,
-      methodX: 146.0,
-      quantityX: 245.2,
-      destinationX: 310.0,
+      transportDateX: 110.0,
+      methodX: 193.0,
+      quantityX: 320.2,
+      destinationX: 345.0,
       remarksX: 420.0,
     },
     {
       // Row 46 (Method 2: Disposal)
       y: 128.5,
-      transportDateX: 74.0,
-      methodX: 146.0,
-      quantityX: 245.2,
-      destinationX: 310.0,
+      transportDateX: 110.0,
+      methodX: 193.0,
+      quantityX: 320.2,
+      destinationX: 345.0,
       remarksX: 420.0,
     },
     {
       // Row 47 (Method 3: Recycling/Recovery)
       y: 106.0,
-      transportDateX: 74.0,
-      methodX: 146.0,
-      quantityX: 245.2,
-      destinationX: 310.0,
+      transportDateX: 110.0,
+      methodX: 193.0,
+      quantityX: 320.2,
+      destinationX: 345.0,
       remarksX: 420.0,
     },
   ],
   grandTotal: {
-    x: 245.2,
+    x: 320.5,
     y: 82.0,
   },
   signedBy: {
@@ -83,6 +83,69 @@ export async function loadWasteMovementPdfTemplate(): Promise<Uint8Array> {
 }
 
 /**
+ * Formats a raw date input into DD-MMM-YY format (e.g. "07-Jul-26").
+ */
+export function formatTransportDate(rawDate: any): string {
+  if (!rawDate) return "";
+  const str = String(rawDate).trim();
+  if (!str) return "";
+
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  // Match YYYY-MM-DD or YYYY/MM/DD
+  const ymdMatch = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (ymdMatch) {
+    const yr = ymdMatch[1].slice(-2);
+    const moIdx = parseInt(ymdMatch[2], 10) - 1;
+    const day = ymdMatch[3].padStart(2, "0");
+    if (moIdx >= 0 && moIdx < 12) {
+      return `${day}-${months[moIdx]}-${yr}`;
+    }
+  }
+
+  // Match DD-MMM-YY or DD-MMM-YYYY (e.g. "07-Jul-26" or "7-Jul-2026")
+  const ddMmmMatch = str.match(/^(\d{1,2})[-/ ]([A-Za-z]{3})[-/ ](\d{2,4})$/);
+  if (ddMmmMatch) {
+    const day = ddMmmMatch[1].padStart(2, "0");
+    const monthStr = ddMmmMatch[2];
+    let yr = ddMmmMatch[3];
+    if (yr.length === 4) yr = yr.slice(-2);
+    const moIdx = months.findIndex((m) => m.toLowerCase() === monthStr.toLowerCase());
+    if (moIdx !== -1) {
+      return `${day}-${months[moIdx]}-${yr}`;
+    }
+  }
+
+  // Match MM/DD/YYYY or DD/MM/YYYY
+  const mdyMatch = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/);
+  if (mdyMatch) {
+    const p1 = parseInt(mdyMatch[1], 10);
+    const p2 = parseInt(mdyMatch[2], 10);
+    let yr = mdyMatch[3];
+    if (yr.length === 4) yr = yr.slice(-2);
+
+    if (p1 >= 1 && p1 <= 12 && p2 >= 1 && p2 <= 31) {
+      const day = String(p2).padStart(2, "0");
+      return `${day}-${months[p1 - 1]}-${yr}`;
+    } else if (p2 >= 1 && p2 <= 12 && p1 >= 1 && p1 <= 31) {
+      const day = String(p1).padStart(2, "0");
+      return `${day}-${months[p2 - 1]}-${yr}`;
+    }
+  }
+
+  // Fallback to Date object parsing
+  const parsedDate = new Date(str.includes("T") ? str : str.replace(/-/g, "/"));
+  if (!isNaN(parsedDate.getTime())) {
+    const day = String(parsedDate.getDate()).padStart(2, "0");
+    const mo = months[parsedDate.getMonth()];
+    const yr = String(parsedDate.getFullYear()).slice(-2);
+    return `${day}-${mo}-${yr}`;
+  }
+
+  return str;
+}
+
+/**
  * Populates the required Waste Movement record fields onto the blank A4 PDF template.
  */
 export async function populateWasteMovementPdf(
@@ -97,7 +160,7 @@ export async function populateWasteMovementPdf(
   const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const textColor = rgb(0.1, 0.1, 0.1);
 
-  // Helper drawing utility
+  // Helper drawing utilities using configured anchor coordinates
   const drawText = (text: string, x: number, y: number, size = 9, isBold = false) => {
     if (!text) return;
     page.drawText(text, {
@@ -105,6 +168,32 @@ export async function populateWasteMovementPdf(
       y,
       size,
       font: isBold ? helveticaBold : helvetica,
+      color: textColor,
+    });
+  };
+
+  const drawCenteredText = (text: string, anchorX: number, y: number, size = 9, isBold = false) => {
+    if (!text) return;
+    const fontToUse = isBold ? helveticaBold : helvetica;
+    const textWidth = fontToUse.widthOfTextAtSize(text, size);
+    page.drawText(text, {
+      x: anchorX - textWidth / 2,
+      y,
+      size,
+      font: fontToUse,
+      color: textColor,
+    });
+  };
+
+  const drawRightAlignedText = (text: string, anchorX: number, y: number, size = 9, isBold = false) => {
+    if (!text) return;
+    const fontToUse = isBold ? helveticaBold : helvetica;
+    const textWidth = fontToUse.widthOfTextAtSize(text, size);
+    page.drawText(text, {
+      x: anchorX - textWidth,
+      y,
+      size,
+      font: fontToUse,
       color: textColor,
     });
   };
@@ -122,50 +211,55 @@ export async function populateWasteMovementPdf(
 
   // 3. Draw Waste Movement Methods & Quantities
   const methodsList = record.methods || [];
-  const m1 = methodsList.find((m: any) => m.method === "Export for recovery");
-  const m2 = methodsList.find((m: any) => m.method === "Disposal");
-  const m3 = methodsList.find((m: any) => m.method === "Recycling/Recovery");
+  const findMethod = (targetName: string) => {
+    return methodsList.find((m: any) => {
+      if (!m || !m.method) return false;
+      const name = String(m.method).trim().toLowerCase();
+      const target = targetName.trim().toLowerCase();
+      return name === target || name.includes(target) || target.includes(name);
+    });
+  };
 
-  const transportDateFormatted = record.transportDate || "";
+  const m1 = findMethod("Export for recovery");
+  const m2 = findMethod("Disposal");
+  const m3 = findMethod("Recycling/Recovery");
+
+  const formattedDate = formatTransportDate(record.transportDate);
 
   const formatQty = (qty: any) => {
-    if (qty === undefined || qty === null || qty === "") return "";
+    if (qty === undefined || qty === null || String(qty).trim() === "") return "-";
     const num = Number(qty);
-    return isNaN(num) ? String(qty) : num.toFixed(3);
+    if (isNaN(num)) return String(qty).trim() || "-";
+    return String(num);
   };
 
   // Row 1: Export for recovery
   const row1 = WASTE_MOVEMENT_PDF_COORDINATES.methodRows[0];
-  if (m1) {
-    drawText(transportDateFormatted, row1.transportDateX, row1.y, 9);
-    drawText(m1.method, row1.methodX, row1.y, 9);
-    drawText(formatQty(m1.quantity), row1.quantityX, row1.y, 9);
-    drawText(m1.destination, row1.destinationX, row1.y, 9);
-    drawText(m1.remarks || record.sourceFileName || "", row1.remarksX, row1.y, 9);
-  }
+  drawCenteredText("Export for recovery", row1.methodX, row1.y, 9);
+  drawRightAlignedText(formatQty(m1?.quantity), row1.quantityX, row1.y, 9);
+  drawText(m1?.destination || "Off-shore Treater", row1.destinationX, row1.y, 9);
+  if (m1?.remarks) drawText(String(m1.remarks).trim(), row1.remarksX, row1.y, 9);
 
-  // Row 2: Disposal
+  // Row 2: Disposal (Transport Date displays ONLY on this Disposal row)
   const row2 = WASTE_MOVEMENT_PDF_COORDINATES.methodRows[1];
-  if (m2) {
-    drawText(transportDateFormatted, row2.transportDateX, row2.y, 9);
-    drawText(m2.method, row2.methodX, row2.y, 9);
-    drawText(formatQty(m2.quantity), row2.quantityX, row2.y, 9);
-    drawText(m2.destination, row2.destinationX, row2.y, 9);
-    drawText(m2.remarks || record.sourceFileName || "", row2.remarksX, row2.y, 9);
+  if (formattedDate) {
+    drawCenteredText(formattedDate, row2.transportDateX, row2.y, 9);
   }
+  drawCenteredText("Disposal", row2.methodX, row2.y, 9);
+  drawRightAlignedText(formatQty(m2?.quantity), row2.quantityX, row2.y, 9);
+  drawText(m2?.destination || "Disposal by SMEI", row2.destinationX, row2.y, 9);
+  if (m2?.remarks) drawText(String(m2.remarks).trim(), row2.remarksX, row2.y, 9);
 
   // Row 3: Recycling/Recovery
   const row3 = WASTE_MOVEMENT_PDF_COORDINATES.methodRows[2];
-  if (m3) {
-    drawText(transportDateFormatted, row3.transportDateX, row3.y, 9);
-    drawText(m3.method, row3.methodX, row3.y, 9);
-    drawText(formatQty(m3.quantity), row3.quantityX, row3.y, 9);
-    drawText(m3.destination, row3.destinationX, row3.y, 9);
-    drawText(m3.remarks || record.sourceFileName || "", row3.remarksX, row3.y, 9);
-  }
+  drawCenteredText("Recycling/Recovery", row3.methodX, row3.y, 9);
+  drawRightAlignedText(formatQty(m3?.quantity), row3.quantityX, row3.y, 9);
+  drawText(m3?.destination || "Local/Offshore", row3.destinationX, row3.y, 9);
+  if (m3?.remarks) drawText(String(m3.remarks).trim(), row3.remarksX, row3.y, 9);
 
-  // 4. Draw Grand Total Quantity
-  drawText(formatQty(record.totalQty || 0), WASTE_MOVEMENT_PDF_COORDINATES.grandTotal.x, WASTE_MOVEMENT_PDF_COORDINATES.grandTotal.y, 9.5, true);
+  // 4. Draw Grand Total Quantity (Right-aligned)
+  const grandTotalStr = formatQty(record.totalQty);
+  drawRightAlignedText(grandTotalStr, WASTE_MOVEMENT_PDF_COORDINATES.grandTotal.x, WASTE_MOVEMENT_PDF_COORDINATES.grandTotal.y, 9.5, true);
 
   return await pdfDoc.save();
 }
@@ -293,13 +387,35 @@ export async function convertSourceToPdf(filename: string, base64Data: string): 
   }
 }
 
+// Cached singleton for pdfjs-dist library initialization
+let pdfjsLibPromise: Promise<any> | null = null;
+
+async function getPdfjsLib(): Promise<any> {
+  if (!pdfjsLibPromise) {
+    pdfjsLibPromise = (async () => {
+      const pdfjsLib = await import("pdfjs-dist");
+      try {
+        // Resolve local pdfjs worker asset via Vite
+        // @ts-ignore
+        const workerModule: any = await import("pdfjs-dist/build/pdf.worker.min.mjs?url");
+        const workerUrl: string = typeof workerModule === "string" ? workerModule : (workerModule?.default || String(workerModule));
+        pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+      } catch (err) {
+        console.warn("[PDF Engine] Local worker URL resolution failed, falling back to CDN:", err);
+        pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@6.1.200/build/pdf.worker.min.mjs";
+      }
+      return pdfjsLib;
+    })();
+  }
+  return pdfjsLibPromise;
+}
+
 /**
  * Helper to dynamically parse the COT PDF using pdfjs-dist and find the Y-coordinate of the "Received on:" text.
  */
 export async function findReceivedOnY(pdfBytes: Uint8Array): Promise<number | null> {
   try {
-    const pdfjsLib: any = await import("pdfjs-dist");
-    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@6.1.200/build/pdf.worker.min.mjs";
+    const pdfjsLib = await getPdfjsLib();
     const loadingTask = pdfjsLib.getDocument({ data: pdfBytes });
     const pdf = await loadingTask.promise;
     const page = await pdf.getPage(1);
@@ -424,7 +540,7 @@ export async function composeWasteMovementDocument(
   // Crop Waste Movement: keep the bottom 285 points (covers table, signatures, references, Grand Total, and title headers)
   // And remove the blank top half of the template page
   const wmCroppedW = wmW;
-  const wmCroppedH = 285; // 285 points height covers all critical Waste Movement sections perfectly and removes unnecessary blank space above
+  const wmCroppedH = 330; // 285 points height covers all critical Waste Movement sections perfectly and removes unnecessary blank space above
   wmPage.setMediaBox(wmX, wmY, wmCroppedW, wmCroppedH);
   wmPage.setCropBox(wmX, wmY, wmCroppedW, wmCroppedH);
 
@@ -481,7 +597,7 @@ export async function composeWasteMovementDocument(
 
   // Position vertically: Move the cropped COT section upward to utilize the unused top margin
   const yCOT = 841.89 - top_margin - drawH_COT; // positioned right at the top available boundary
-  const yWM = yCOT - spacing - drawH_WM; // positioned below COT with tight spacing
+  const yWM = yCOT - spacing - drawH_WM - 15; // positioned below COT with tight spacing
 
   // 9. Draw both sections onto the SAME single page
   finalPage.drawPage(embeddedCOT, {

@@ -11,6 +11,7 @@ import { motion } from "motion/react";
 import { ArrowLeft, Save, Send, CheckCircle2, AlertTriangle, Printer, Trash2, Plus, RefreshCw, PenTool, Check, FileCheck, CircleSlash, XCircle, FileText, FileSpreadsheet } from "lucide-react";
 import { exportPOToWord, exportPOToXLSM } from "../utils/wordExport";
 import { formatRFSNo } from "../utils/templateMapping";
+import { formatControlNumber } from "../utils/controlNumber";
 import smeiLogo from "../assets/images/smei_logo_1782431389924.jpg";
 
 interface POFormProps {
@@ -1323,7 +1324,7 @@ export default function POForm({
                   disabled={!isNew && !isAdmin}
                   value={poNumber}
                   onChange={(e) => {
-                    setPoNumber(e.target.value.toUpperCase());
+                    setPoNumber(formatControlNumber(e.target.value, "poNumber"));
                     if (errors.poNumber) setErrors(prev => ({ ...prev, poNumber: "" }));
                   }}
                   placeholder="e.g. SMEI-2026-0001"

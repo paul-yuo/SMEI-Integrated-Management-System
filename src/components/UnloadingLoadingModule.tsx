@@ -14,6 +14,7 @@ import {
 import { exportExcelWithTemplate } from "../utils/templateExport";
 import { ExportExcelButton } from "./SharedButtons";
 import { validateManifestNumber } from "../utils/manifestHelper";
+import { formatControlNumber } from "../utils/controlNumber";
 
 interface ComplianceRecord {
   id: string;
@@ -22,10 +23,8 @@ interface ComplianceRecord {
   date: string;
   unloadingFileName?: string;
   unloadingFileData?: string; // base64
-  unloadingDesc: string;
   loadingFileName?: string;
   loadingFileData?: string; // base64
-  loadingDesc: string;
   createdAt: string;
 }
 
@@ -38,14 +37,10 @@ export default function UnloadingLoadingModule() {
 
   // Form states
   const [compCA, setCompCA] = useState("");
-  const [compTitle, setCompTitle] = useState("");
-  const [compDate, setCompDate] = useState("");
   
-  const [compUnloadingDesc, setCompUnloadingDesc] = useState("");
   const [compUnloadingFileName, setCompUnloadingFileName] = useState("");
   const [compUnloadingData, setCompUnloadingData] = useState("");
 
-  const [compLoadingDesc, setCompLoadingDesc] = useState("");
   const [compLoadingFileName, setCompLoadingFileName] = useState("");
   const [compLoadingData, setCompLoadingData] = useState("");
 
@@ -118,9 +113,7 @@ export default function UnloadingLoadingModule() {
           title: "Inbound Acid Digestion Consignment Checklist",
           date: new Date().toISOString().split("T")[0],
           unloadingFileName: "inbound_leak_test_report.pdf",
-          unloadingDesc: "Completed visual drum inspections. Pressure safety valves fully operational, zero leaks detected on arrival.",
           loadingFileName: "treated_ash_consignment_receipt.pdf",
-          loadingDesc: "Fly ash neutralization complete. Safe pH levels of 7.2 confirmed prior to secondary loading clearance.",
           createdAt: new Date().toLocaleDateString() + " 10:00 AM"
         }
       ];
@@ -232,12 +225,8 @@ export default function UnloadingLoadingModule() {
   const handleCreateNew = () => {
     setEditingRecord(null);
     setCompCA("");
-    setCompTitle("");
-    setCompDate(new Date().toISOString().split("T")[0]);
-    setCompUnloadingDesc("");
     setCompUnloadingFileName("");
     setCompUnloadingData("");
-    setCompLoadingDesc("");
     setCompLoadingFileName("");
     setCompLoadingData("");
     setIsModalOpen(true);
@@ -245,8 +234,8 @@ export default function UnloadingLoadingModule() {
 
   const handleSaveCompliance = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!compCA.trim() || !compTitle.trim()) {
-      alert("Manifest Number and Title / Header are required fields.");
+    if (!compCA.trim()) {
+      alert("Manifest Number is a required field.");
       return;
     }
 
@@ -266,12 +255,8 @@ export default function UnloadingLoadingModule() {
           return {
             ...r,
             caNumber: compCA.toUpperCase(),
-            title: compTitle,
-            date: compDate || new Date().toISOString().split("T")[0],
             unloadingFileName: compUnloadingFileName || r.unloadingFileName,
-            unloadingDesc: compUnloadingDesc,
-            loadingFileName: compLoadingFileName || r.loadingFileName,
-            loadingDesc: compLoadingDesc
+            loadingFileName: compLoadingFileName || r.loadingFileName
           };
         }
         return r;
@@ -291,12 +276,10 @@ export default function UnloadingLoadingModule() {
       const newRec: ComplianceRecord = {
         id: newRecordId,
         caNumber: compCA.toUpperCase(),
-        title: compTitle,
-        date: compDate || new Date().toISOString().split("T")[0],
+        title: "Geotagged Loading and Unloading Photograph Record",
+        date: new Date().toISOString().split("T")[0],
         unloadingFileName: compUnloadingFileName,
-        unloadingDesc: compUnloadingDesc,
         loadingFileName: compLoadingFileName,
-        loadingDesc: compLoadingDesc,
         createdAt: new Date().toLocaleDateString() + " " + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
       updatedDocs = [newRec, ...compRecords];
@@ -310,12 +293,8 @@ export default function UnloadingLoadingModule() {
   const handleEditComp = (record: ComplianceRecord) => {
     setEditingRecord(record);
     setCompCA((record.caNumber || "").toUpperCase());
-    setCompTitle(record.title);
-    setCompDate(record.date);
-    setCompUnloadingDesc(record.unloadingDesc);
     setCompUnloadingFileName(record.unloadingFileName || "");
     setCompUnloadingData(localStorage.getItem(`tsd_unloading_data_${record.id}`) || record.unloadingFileData || "");
-    setCompLoadingDesc(record.loadingDesc);
     setCompLoadingFileName(record.loadingFileName || "");
     setCompLoadingData(localStorage.getItem(`tsd_loading_data_${record.id}`) || record.loadingFileData || "");
     setIsModalOpen(true);
@@ -343,15 +322,8 @@ export default function UnloadingLoadingModule() {
       const exportData = {
         CONTROL_NO: record.caNumber,
         CA_NO: record.caNumber,
-        SUBJECT_HEADER: record.title,
-        REPORT_DATE: record.date,
-        PREPARED_BY: "Environmental Compliance Officer",
-        LOADING_TITLE: record.title,
-        LOADING_IMAGE: localStorage.getItem(`tsd_loading_data_${record.id}`) || record.loadingFileData || FALLBACK_1X1_PNG,
-        LOADING_DESCRIPTION: record.loadingDesc || "No loading description provided.",
-        UNLOADING_TITLE: record.title,
         UNLOADING_IMAGE: localStorage.getItem(`tsd_unloading_data_${record.id}`) || record.unloadingFileData || FALLBACK_1X1_PNG,
-        UNLOADING_DESCRIPTION: record.unloadingDesc || "No unloading description provided."
+        LOADING_IMAGE: localStorage.getItem(`tsd_loading_data_${record.id}`) || record.loadingFileData || FALLBACK_1X1_PNG
       };
 
       await exportExcelWithTemplate(
@@ -586,9 +558,6 @@ export default function UnloadingLoadingModule() {
                     </button>
                   )}
                 </div>
-                <div className="text-gray-600 dark:text-slate-300 font-sans italic">
-                  "{selectedRecord.unloadingDesc || "No remarks entered."}"
-                </div>
                 {selectedRecord.unloadingFileName && (
                   <div className="text-[9px] font-mono text-gray-400 dark:text-slate-500 truncate bg-white dark:bg-slate-900 p-1.5 rounded border border-gray-100 dark:border-slate-800">
                     File: {selectedRecord.unloadingFileName}
@@ -628,9 +597,6 @@ export default function UnloadingLoadingModule() {
                       Download Attachment
                     </button>
                   )}
-                </div>
-                <div className="text-gray-600 dark:text-slate-300 font-sans italic">
-                  "{selectedRecord.loadingDesc || "No remarks entered."}"
                 </div>
                 {selectedRecord.loadingFileName && (
                   <div className="text-[9px] font-mono text-gray-400 dark:text-slate-500 truncate bg-white dark:bg-slate-900 p-1.5 rounded border border-gray-100 dark:border-slate-800">
@@ -678,7 +644,7 @@ export default function UnloadingLoadingModule() {
             {/* Modal Header */}
             <div className="p-4 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between">
               <h3 className="text-sm font-bold text-gray-800 dark:text-slate-200 font-display flex items-center gap-1.5 uppercase tracking-wider">
-                <span>{editingRecord ? "Edit Compliance Log" : "New Unloading/Loading Log"}</span>
+                <span>NEW UNLOADING/LOADING LOG</span>
               </h3>
               <button 
                 onClick={() => setIsModalOpen(false)}
@@ -690,152 +656,56 @@ export default function UnloadingLoadingModule() {
 
             {/* Modal Body */}
             <form onSubmit={handleSaveCompliance} className="p-5 space-y-4 overflow-y-auto flex-1">
-              {/* General Information */}
-              <div className="space-y-3 bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-gray-100 dark:border-slate-800">
-                <h4 className="text-[10px] font-bold text-gray-400 dark:text-slate-500 uppercase tracking-widest font-mono">Document Information</h4>
-                
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-[10px] font-bold text-gray-500 dark:text-slate-400 uppercase">Manifest Number *</label>
-                    {compCA && !validateManifestNumber(compCA) && (
-                      <span className="text-[10px] text-amber-600 dark:text-amber-500 font-semibold flex items-center gap-1">
-                        <AlertCircle className="w-3.5 h-3.5" />
-                        Invalid format
-                      </span>
-                    )}
-                  </div>
-                  <input
-                    type="text"
-                    required
-                    value={compCA}
-                    onChange={(e) => setCompCA(e.target.value.toUpperCase())}
-                    placeholder="e.g. M-R3-2026-07-632758"
-                    className={`w-full bg-white dark:bg-slate-900 text-gray-700 dark:text-slate-200 border rounded-lg text-xs p-2.5 focus:outline-none focus:ring-1 focus:ring-smei-crimson focus:border-transparent font-mono ${
-                      compCA && !validateManifestNumber(compCA)
-                        ? "border-amber-400 dark:border-amber-500 focus:ring-amber-500"
-                        : "border-gray-200 dark:border-slate-800"
-                    }`}
-                  />
+              {/* Manifest Number */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[10px] font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wider">
+                    MANIFEST NUMBER *
+                  </label>
                   {compCA && !validateManifestNumber(compCA) && (
-                    <div className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 leading-normal space-y-0.5">
-                      <p className="font-semibold">Use the format M-{"{"}REGION{"}"}-YYYY-MM-#</p>
-                      <p className="text-gray-500 dark:text-slate-400 font-normal">
-                        For example: M-R3-2026-07-632758. The region (e.g. R1, R2, R4A, NCR) must remain dynamic.
-                      </p>
-                    </div>
+                    <span className="text-[10px] text-amber-600 dark:text-amber-500 font-semibold flex items-center gap-1">
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      Invalid format
+                    </span>
                   )}
                 </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-gray-500 dark:text-slate-400 uppercase mb-1">Title / Header *</label>
-                  <input
-                    type="text"
-                    required
-                    value={compTitle}
-                    onChange={(e) => setCompTitle(e.target.value)}
-                    placeholder="e.g. Acid Digestion Safety Check..."
-                    className="w-full bg-white dark:bg-slate-900 text-gray-700 dark:text-slate-200 border border-gray-200 dark:border-slate-800 rounded-lg text-xs p-2.5 focus:outline-none focus:ring-1 focus:ring-smei-crimson focus:border-transparent font-sans"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-gray-500 dark:text-slate-400 uppercase mb-1">Date</label>
-                  <input
-                    type="date"
-                    value={compDate}
-                    onChange={(e) => setCompDate(e.target.value)}
-                    className="w-full bg-white dark:bg-slate-900 text-gray-700 dark:text-slate-200 border border-gray-200 dark:border-slate-800 rounded-lg text-xs p-2.5 focus:outline-none focus:ring-1 focus:ring-smei-crimson focus:border-transparent font-mono cursor-pointer"
-                  />
-                </div>
+                <input
+                  type="text"
+                  required
+                  value={compCA}
+                  onChange={(e) => setCompCA(formatControlNumber(e.target.value, "manifestNo"))}
+                  placeholder="e.g. M-R3-2026-07-632758"
+                  className={`w-full bg-white dark:bg-slate-900 text-gray-700 dark:text-slate-200 border rounded-lg text-xs p-2.5 focus:outline-none focus:ring-1 focus:ring-smei-crimson focus:border-transparent font-mono ${
+                    compCA && !validateManifestNumber(compCA)
+                      ? "border-amber-400 dark:border-amber-500 focus:ring-amber-500"
+                      : "border-gray-200 dark:border-slate-800"
+                  }`}
+                />
+                {compCA && !validateManifestNumber(compCA) && (
+                  <div className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 leading-normal space-y-0.5">
+                    <p className="font-semibold">Use the format M-{"{"}REGION{"}"}-YYYY-MM-#</p>
+                    <p className="text-gray-500 dark:text-slate-400 font-normal">
+                      For example: M-R3-2026-07-632758. The region (e.g. R1, R2, R4A, NCR) must remain dynamic.
+                    </p>
+                  </div>
+                )}
               </div>
 
-              {/* Unloading Section */}
-              <div className="space-y-3 bg-red-50/30 dark:bg-red-950/10 p-4 rounded-xl border border-red-100 dark:border-red-900/20">
-                <h4 className="text-[10px] font-bold text-smei-crimson dark:text-rose-400 uppercase tracking-widest font-mono">
-                  UNLOADING COMPLIANCE
-                </h4>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-gray-500 dark:text-slate-400 uppercase mb-1">Upload File (PDF/Image)</label>
-                  <div
-                    onDragOver={handleUnloadingDragOver}
-                    onDragLeave={handleUnloadingDragLeave}
-                    onDrop={handleUnloadingDrop}
-                    className={`relative flex flex-col items-center justify-center p-3 border-2 border-dashed rounded-lg transition-all ${
-                      isUnloadingDragOver
-                        ? "border-smei-crimson bg-red-50/50 dark:bg-red-950/20"
-                        : "border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-smei-crimson"
-                    }`}
-                  >
-                    {compUnloadingData ? (
-                      <div className="w-full space-y-2">
-                        <div className="flex items-center justify-between gap-2 p-2 bg-slate-50 dark:bg-slate-950 rounded-lg">
-                          <div className="flex items-center gap-2 truncate">
-                            {compUnloadingData.startsWith("data:image/") ? (
-                              <img src={compUnloadingData} alt="Unloading Preview" className="w-8 h-8 object-cover rounded border shrink-0" />
-                            ) : (
-                              <FileText className="w-6 h-6 text-rose-500 shrink-0" />
-                            )}
-                            <span className="text-xs font-mono truncate text-gray-700 dark:text-slate-300">{compUnloadingFileName}</span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setCompUnloadingFileName("");
-                              setCompUnloadingData("");
-                            }}
-                            className="p-1 text-gray-400 hover:text-red-500 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/50 cursor-pointer shrink-0"
-                            title="Remove file"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                        {compUnloadingData.startsWith("data:image/") && (
-                          <div className="relative aspect-video rounded overflow-hidden border bg-black/5 dark:bg-white/5 flex items-center justify-center">
-                            <img src={compUnloadingData} alt="Preview" className="max-h-[100px] object-contain" />
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <label className="flex flex-col items-center gap-1.5 cursor-pointer text-center w-full py-3">
-                        <UploadCloud className="w-6 h-6 text-gray-400" />
-                        <span className="text-xs font-semibold text-gray-600 dark:text-slate-300">
-                          Drag file here, or click to browse
-                        </span>
-                        <span className="text-[9px] text-gray-400">
-                          PDF, PNG, JPG, JPEG (Max 5MB)
-                        </span>
-                        <input 
-                          type="file" 
-                          accept=".pdf,.png,.jpg,.jpeg" 
-                          className="hidden" 
-                          onChange={handleUnloadingFileChange} 
-                        />
-                      </label>
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-gray-500 dark:text-slate-400 uppercase mb-1">Unloading Remarks / Desc</label>
-                  <textarea
-                    value={compUnloadingDesc}
-                    onChange={(e) => setCompUnloadingDesc(e.target.value)}
-                    placeholder="Specify safety parameters during receiving unloading..."
-                    rows={2}
-                    className="w-full bg-white dark:bg-slate-900 text-gray-700 dark:text-slate-200 border border-gray-200 dark:border-slate-800 rounded-lg text-xs p-2.5 focus:outline-none focus:ring-1 focus:ring-smei-crimson focus:border-transparent resize-none"
-                  />
-                </div>
+              {/* Introductory Static Description */}
+              <div className="p-3 bg-slate-50 dark:bg-slate-950/80 rounded-xl border border-gray-100 dark:border-slate-800 text-slate-600 dark:text-slate-300 text-xs leading-relaxed font-sans">
+                In compliance with the Permit to Transport provision no. 5, below are the geotagged photograph of actual loading and unloading of Hazardous Wastes.
               </div>
 
               {/* Loading Section */}
-              <div className="space-y-3 bg-blue-50/30 dark:bg-blue-950/10 p-4 rounded-xl border border-blue-100 dark:border-blue-900/20">
-                <h4 className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest font-mono">
-                  LOADING COMPLIANCE
+              <div className="space-y-2.5 bg-blue-50/30 dark:bg-blue-950/10 p-4 rounded-xl border border-blue-100 dark:border-blue-900/20">
+                <h4 className="text-[11px] font-bold text-blue-700 dark:text-blue-400 uppercase tracking-wide font-mono">
+                  LOADING PHOTO ( Generator's Plant )
                 </h4>
 
                 <div>
-                  <label className="block text-[10px] font-bold text-gray-500 dark:text-slate-400 uppercase mb-1">Upload File (PDF/Image)</label>
+                  <label className="block text-[10px] font-bold text-gray-500 dark:text-slate-400 uppercase mb-1">
+                    UPLOAD FILE (PDF/IMAGE)
+                  </label>
                   <div
                     onDragOver={handleLoadingDragOver}
                     onDragLeave={handleLoadingDragLeave}
@@ -895,16 +765,83 @@ export default function UnloadingLoadingModule() {
                   </div>
                 </div>
 
+                <p className="text-xs text-gray-600 dark:text-slate-300 font-sans italic">
+                  Material placed in pallets/bags are being loaded in the truck.
+                </p>
+              </div>
+
+              {/* Unloading Section */}
+              <div className="space-y-2.5 bg-red-50/30 dark:bg-red-950/10 p-4 rounded-xl border border-red-100 dark:border-red-900/20">
+                <h4 className="text-[11px] font-bold text-smei-crimson dark:text-rose-400 uppercase tracking-wide font-mono">
+                  UNLOADING PHOTO ( Treater's Plant )
+                </h4>
+
                 <div>
-                  <label className="block text-[10px] font-bold text-gray-500 dark:text-slate-400 uppercase mb-1">Loading Remarks / Desc</label>
-                  <textarea
-                    value={compLoadingDesc}
-                    onChange={(e) => setCompLoadingDesc(e.target.value)}
-                    placeholder="Specify safety parameters during material loading..."
-                    rows={2}
-                    className="w-full bg-white dark:bg-slate-900 text-gray-700 dark:text-slate-200 border border-gray-200 dark:border-slate-800 rounded-lg text-xs p-2.5 focus:outline-none focus:ring-1 focus:ring-smei-crimson focus:border-transparent resize-none"
-                  />
+                  <label className="block text-[10px] font-bold text-gray-500 dark:text-slate-400 uppercase mb-1">
+                    UPLOAD FILE (PDF/IMAGE)
+                  </label>
+                  <div
+                    onDragOver={handleUnloadingDragOver}
+                    onDragLeave={handleUnloadingDragLeave}
+                    onDrop={handleUnloadingDrop}
+                    className={`relative flex flex-col items-center justify-center p-3 border-2 border-dashed rounded-lg transition-all ${
+                      isUnloadingDragOver
+                        ? "border-smei-crimson bg-red-50/50 dark:bg-red-950/20"
+                        : "border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-smei-crimson"
+                    }`}
+                  >
+                    {compUnloadingData ? (
+                      <div className="w-full space-y-2">
+                        <div className="flex items-center justify-between gap-2 p-2 bg-slate-50 dark:bg-slate-950 rounded-lg">
+                          <div className="flex items-center gap-2 truncate">
+                            {compUnloadingData.startsWith("data:image/") ? (
+                              <img src={compUnloadingData} alt="Unloading Preview" className="w-8 h-8 object-cover rounded border shrink-0" />
+                            ) : (
+                              <FileText className="w-6 h-6 text-rose-500 shrink-0" />
+                            )}
+                            <span className="text-xs font-mono truncate text-gray-700 dark:text-slate-300">{compUnloadingFileName}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCompUnloadingFileName("");
+                              setCompUnloadingData("");
+                            }}
+                            className="p-1 text-gray-400 hover:text-red-500 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/50 cursor-pointer shrink-0"
+                            title="Remove file"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        {compUnloadingData.startsWith("data:image/") && (
+                          <div className="relative aspect-video rounded overflow-hidden border bg-black/5 dark:bg-white/5 flex items-center justify-center">
+                            <img src={compUnloadingData} alt="Preview" className="max-h-[100px] object-contain" />
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <label className="flex flex-col items-center gap-1.5 cursor-pointer text-center w-full py-3">
+                        <UploadCloud className="w-6 h-6 text-gray-400" />
+                        <span className="text-xs font-semibold text-gray-600 dark:text-slate-300">
+                          Drag file here, or click to browse
+                        </span>
+                        <span className="text-[9px] text-gray-400">
+                          PDF, PNG, JPG, JPEG (Max 5MB)
+                        </span>
+                        <input 
+                          type="file" 
+                          accept=".pdf,.png,.jpg,.jpeg" 
+                          className="hidden" 
+                          onChange={handleUnloadingFileChange} 
+                        />
+                      </label>
+                    )}
+                  </div>
                 </div>
+
+                <p className="text-xs text-gray-600 dark:text-slate-300 font-sans italic">
+                  Materials placed in pallets/bags are being unloaded in the truck.
+                </p>
               </div>
 
               {/* Form Actions */}
@@ -918,10 +855,10 @@ export default function UnloadingLoadingModule() {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 bg-smei-crimson hover:bg-smei-darkred text-white text-xs font-semibold h-[38px] rounded-lg transition-all flex items-center justify-center gap-1.5 shadow-sm cursor-pointer hover:scale-[1.02] active:scale-95"
+                  className="flex-1 bg-smei-crimson hover:bg-smei-darkred text-white text-xs font-semibold h-[38px] rounded-lg transition-all flex items-center justify-center gap-1.5 shadow-sm cursor-pointer hover:scale-[1.02] active:scale-95 uppercase tracking-wider"
                 >
                   <CheckCircle className="w-4 h-4" />
-                  <span>{editingRecord ? "Save Changes" : "Create Record"}</span>
+                  <span>{editingRecord ? "SAVE" : "CREATE / SAVE"}</span>
                 </button>
               </div>
             </form>

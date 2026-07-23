@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { exportExcelWithTemplate } from "../utils/templateExport";
 import { validateManifestNumber, generateManifestNumber } from "../utils/manifestHelper";
+import { formatControlNumber } from "../utils/controlNumber";
 import DeleteConfirmationModal from "./DeleteConfirmationModal";
 
 interface WasteItem {
@@ -578,7 +579,11 @@ export default function HazardousWasteModule() {
           <button
             onClick={handleExportSelected}
             disabled={!selectedRecordId}
-            className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-semibold h-[38px] px-4 rounded-lg flex items-center justify-center gap-1.5 shadow-sm transition-all hover:scale-[1.02] active:scale-95 cursor-pointer"
+            className={`text-xs font-semibold h-[38px] px-4 rounded-lg flex items-center justify-center gap-1.5 shadow-sm transition-all whitespace-nowrap ${
+              !selectedRecordId
+                ? "bg-gray-100 dark:bg-slate-800/80 text-gray-400 dark:text-slate-500 border border-gray-200 dark:border-slate-700 cursor-not-allowed"
+                : "bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-600 hover:scale-[1.02] active:scale-95 cursor-pointer shadow-[0_2px_8px_rgba(16,185,129,0.15)]"
+            }`}
           >
             <FileSpreadsheet className="w-4 h-4" />
             <span>Export Selected Manifest</span>
@@ -816,7 +821,7 @@ export default function HazardousWasteModule() {
                     type="text"
                     required
                     value={manifestNo}
-                    onChange={(e) => setManifestNo(e.target.value.toUpperCase())}
+                    onChange={(e) => setManifestNo(formatControlNumber(e.target.value, "manifestNo"))}
                     placeholder="M-R3-2026-07-123456"
                     className={`w-full bg-white dark:bg-slate-900 text-gray-700 dark:text-slate-200 border rounded-lg text-xs p-2.5 focus:outline-none focus:ring-1 focus:ring-smei-crimson focus:border-transparent font-mono ${
                       manifestNo && !validateManifestNumber(manifestNo)
@@ -865,9 +870,9 @@ export default function HazardousWasteModule() {
                     type="text"
                     required
                     value={recycleCertNo}
-                    onChange={(e) => setRecycleCertNo(e.target.value)}
-                    placeholder="Recycling Certification number..."
-                    className="w-full bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg text-xs p-2.5 focus:outline-none focus:ring-1 focus:ring-smei-crimson focus:border-transparent text-gray-700 dark:text-slate-200 font-sans transition-all"
+                    onChange={(e) => setRecycleCertNo(formatControlNumber(e.target.value, "rcNumber"))}
+                    placeholder="e.g. R-123"
+                    className="w-full bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg text-xs p-2.5 focus:outline-none focus:ring-1 focus:ring-smei-crimson focus:border-transparent text-gray-700 dark:text-slate-200 font-mono transition-all"
                   />
                 </div>
 
@@ -878,8 +883,8 @@ export default function HazardousWasteModule() {
                     type="text"
                     required
                     value={mrrNo}
-                    onChange={(e) => setMrrNo(e.target.value)}
-                    placeholder="MRR Ref..."
+                    onChange={(e) => setMrrNo(formatControlNumber(e.target.value, "mrrNumber"))}
+                    placeholder="e.g. MRR-2026-001"
                     className="w-full bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg text-xs p-2.5 focus:outline-none focus:ring-1 focus:ring-smei-crimson focus:border-transparent text-gray-700 dark:text-slate-200 font-mono transition-all"
                   />
                 </div>

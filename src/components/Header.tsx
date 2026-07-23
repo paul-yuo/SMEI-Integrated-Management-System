@@ -78,8 +78,6 @@ export default function Header({
         return "Compliance Timestamp Timeline Tracker";
       case "manifest-summary":
         return "Hazardous Waste Manifest Summary Ledger";
-      case "tsd-summary":
-        return "TSD Facility Summary Executive Dashboard";
       case "po-list":
         return "Purchase Orders Directory";
       case "po-form":
@@ -380,16 +378,6 @@ export default function Header({
                   }`}
                 >
                   Manifest Sum
-                </button>
-                <button
-                  onClick={() => onNavigate("tsd-summary")}
-                  className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider rounded transition-all duration-200 ${
-                    currentTab === "tsd-summary"
-                      ? "bg-[#B22222] text-white shadow-[0_2px_8px_rgba(178,34,34,0.3)] scale-[1.03]"
-                      : "text-gray-600 hover:text-[#B22222] hover:bg-red-50 hover:scale-[1.04] active:scale-95 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-900"
-                  }`}
-                >
-                  TSD Sum
                 </button>
               </>
             ) : (

@@ -37,7 +37,6 @@ const HazardousWasteModule = lazy(() => import("./components/HazardousWasteModul
 const WasteMovementModule = lazy(() => import("./components/WasteMovementModule"));
 const TimestampModule = lazy(() => import("./components/TimestampModule"));
 const ManifestSummaryModule = lazy(() => import("./components/ManifestSummaryModule"));
-const TsdSummaryModule = lazy(() => import("./components/TsdSummaryModule"));
 
 // Compact high-contrast module loader matching POMS design language
 const ModuleLoader = () => (
@@ -436,7 +435,6 @@ export default function App() {
         { name: "Waste Movement", key: "waste-movement", icon: "role-management" },
         { name: "Timestamp", key: "timestamp", icon: "log" },
         { name: "Manifest Summary", key: "manifest-summary", icon: "reports" },
-        { name: "TSD Summary", key: "tsd-summary", icon: "home" },
       ];
 
       if (role === UserRole.Administrator) {
@@ -561,7 +559,6 @@ export default function App() {
     else if (menuKey === "waste-movement") targetTab = "waste-movement";
     else if (menuKey === "timestamp") targetTab = "timestamp";
     else if (menuKey === "manifest-summary") targetTab = "manifest-summary";
-    else if (menuKey === "tsd-summary") targetTab = "tsd-summary";
     else if (menuKey === "po-all" || menuKey === "po-review" || menuKey === "approval-queue" || menuKey === "verification-queue" || menuKey === "final-approval-queue" || menuKey === "excel-import" || menuKey === "excel-export") targetTab = "po-list";
     else if (menuKey === "pis") targetTab = "pis";
     else if (menuKey === "rfs") targetTab = "rfs";
@@ -595,8 +592,6 @@ export default function App() {
         setCurrentTab("timestamp");
       } else if (menuKey === "manifest-summary") {
         setCurrentTab("manifest-summary");
-      } else if (menuKey === "tsd-summary") {
-        setCurrentTab("tsd-summary");
       } else if (menuKey === "po-all") {
         setPoListStatusFilter("All");
         setCurrentTab("po-list");
@@ -699,7 +694,6 @@ export default function App() {
     if (menuKey === "waste-movement") return currentTab === "waste-movement";
     if (menuKey === "timestamp") return currentTab === "timestamp";
     if (menuKey === "manifest-summary") return currentTab === "manifest-summary";
-    if (menuKey === "tsd-summary") return currentTab === "tsd-summary";
     if (menuKey === "pis") return currentTab === "pis";
     if (menuKey === "rfs") return currentTab === "rfs";
     if (menuKey === "rfs-approval") return currentTab === "rfs-approval";
@@ -1126,10 +1120,6 @@ export default function App() {
 
               {currentTab === "manifest-summary" && (
                 <ManifestSummaryModule />
-              )}
-
-              {currentTab === "tsd-summary" && (
-                <TsdSummaryModule />
               )}
 
               {currentTab === "po-list" && (

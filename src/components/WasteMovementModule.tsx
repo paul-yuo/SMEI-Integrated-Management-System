@@ -23,6 +23,14 @@ import {
   Trash
 } from "lucide-react";
 import { exportExcelWithTemplate } from "../utils/templateExport";
+import { formatControlNumber } from "../utils/controlNumber";
+
+export function formatQuantityDisplay(qty: any): string {
+  if (qty === null || qty === undefined || String(qty).trim() === "") return "-";
+  const num = Number(qty);
+  if (isNaN(num)) return String(qty).trim() || "-";
+  return String(num);
+}
 
 // Self-contained IndexedDB utility inside WasteMovementModule.tsx
 const DB_NAME = "smei_waste_movement_db";
@@ -603,21 +611,21 @@ export default function WasteMovementModule() {
       SIGNED_POSITION: "Pollution Control Officer",
       NOTED_BY: rec.notedBy || "APRILYN ROGADOR",
       NOTED_POSITION: "Asst. Admin/Technical Manager",
-      TOTAL_QTY: rec.totalQty || 0,
+      TOTAL_QTY: formatQuantityDisplay(rec.totalQty),
       
-      METHOD_1: m1 ? m1.method : "",
-      QUANTITY_1: m1 ? m1.quantity : "",
-      DESTINATION_1: m1 ? m1.destination : "",
+      METHOD_1: "Export for recovery",
+      QUANTITY_1: formatQuantityDisplay(m1?.quantity),
+      DESTINATION_1: m1?.destination || "Off-shore Treater",
       REMARKS_1: m1 ? (m1.remarks || rec.sourceFileName || "") : "",
 
-      METHOD_2: m2 ? m2.method : "",
-      QUANTITY_2: m2 ? m2.quantity : "",
-      DESTINATION_2: m2 ? m2.destination : "",
+      METHOD_2: "Disposal",
+      QUANTITY_2: formatQuantityDisplay(m2?.quantity),
+      DESTINATION_2: m2?.destination || "Disposal by SMEI",
       REMARKS_2: m2 ? (m2.remarks || rec.sourceFileName || "") : "",
 
-      METHOD_3: m3 ? m3.method : "",
-      QUANTITY_3: m3 ? m3.quantity : "",
-      DESTINATION_3: m3 ? m3.destination : "",
+      METHOD_3: "Recycling/Recovery",
+      QUANTITY_3: formatQuantityDisplay(m3?.quantity),
+      DESTINATION_3: m3?.destination || "Local/Offshore",
       REMARKS_3: m3 ? (m3.remarks || rec.sourceFileName || "") : ""
     };
 
@@ -790,7 +798,11 @@ export default function WasteMovementModule() {
           <button
             onClick={handleExportSelected}
             disabled={!selectedMovementId}
-            className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-semibold h-[38px] px-4 rounded-lg flex items-center justify-center gap-1.5 shadow-sm transition-all hover:scale-[1.02] active:scale-95 cursor-pointer font-sans"
+            className={`text-xs font-semibold h-[38px] px-4 rounded-lg flex items-center justify-center gap-1.5 shadow-sm transition-all whitespace-nowrap font-sans ${
+              !selectedMovementId
+                ? "bg-gray-100 dark:bg-slate-800/80 text-gray-400 dark:text-slate-500 border border-gray-200 dark:border-slate-700 cursor-not-allowed"
+                : "bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-600 hover:scale-[1.02] active:scale-95 cursor-pointer shadow-[0_2px_8px_rgba(16,185,129,0.15)]"
+            }`}
           >
             <FileSpreadsheet className="w-4 h-4" />
             <span>Export Excel</span>
@@ -949,7 +961,7 @@ export default function WasteMovementModule() {
                           </div>
                         </td>
                         <td className="py-3 px-4 font-mono text-right font-bold text-slate-700 dark:text-slate-300">
-                          {rec.totalQty.toFixed(4)}
+                          {formatQuantityDisplay(rec.totalQty)}
                         </td>
                         <td className="py-3 px-4 text-slate-500 dark:text-slate-400 truncate max-w-[150px]" title={rec.sourceFileName}>
                           <span className="flex items-center gap-1">
@@ -1123,7 +1135,7 @@ export default function WasteMovementModule() {
                       required
                       placeholder="e.g. CRD-06-1309-26"
                       value={formCrdNo}
-                      onChange={(e) => setFormCrdNo(e.target.value.toUpperCase())}
+                      onChange={(e) => setFormCrdNo(formatControlNumber(e.target.value, "crdNumber"))}
                       className={`w-full bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 border rounded-lg p-2.5 focus:outline-none focus:ring-1 focus:ring-smei-crimson font-mono ${
                         formCrdNo && !validateCrdNumber(formCrdNo)
                           ? "border-amber-400 dark:border-amber-500"
@@ -1140,9 +1152,9 @@ export default function WasteMovementModule() {
                       type="text"
                       disabled={formRcNo === "N/A"}
                       required={formRcNo !== "N/A"}
-                      placeholder={formRcNo === "N/A" ? "Auto set to N/A (Disposal/Recycle not added)" : "e.g. RC-2026-T1"}
+                      placeholder={formRcNo === "N/A" ? "Auto set to N/A (Disposal/Recycle not added)" : "e.g. R-123"}
                       value={formRcNo}
-                      onChange={(e) => setFormRcNo(e.target.value.toUpperCase())}
+                      onChange={(e) => setFormRcNo(formatControlNumber(e.target.value, "rcNumber"))}
                       className="w-full bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 border border-gray-200 dark:border-slate-800 text-xs rounded-lg p-2.5 focus:outline-none focus:ring-1 focus:ring-smei-crimson font-mono disabled:opacity-50"
                     />
                   </div>
@@ -1230,7 +1242,7 @@ export default function WasteMovementModule() {
                           <tr key={idx}>
                             <td className="p-2 font-medium">{m.method}</td>
                             <td className="p-2 text-right font-mono font-bold text-slate-700 dark:text-slate-300">
-                              {m.quantity.toFixed(4)}
+                              {formatQuantityDisplay(m.quantity)}
                             </td>
                             <td className="p-2 truncate max-w-[150px]">{m.destination}</td>
                             <td className="p-2 text-center">
@@ -1252,7 +1264,7 @@ export default function WasteMovementModule() {
                     <div className="p-2.5 bg-slate-50 dark:bg-slate-950 text-right border-t border-gray-100 dark:border-slate-800 font-mono font-bold flex justify-between items-center text-xs">
                       <span className="text-gray-400 font-sans font-semibold">Grand Total:</span>
                       <span className="text-emerald-600 dark:text-emerald-400">
-                        {formMethods.reduce((sum, m) => sum + m.quantity, 0).toFixed(4)} MT
+                        {formatQuantityDisplay(formMethods.reduce((sum, m) => sum + (m.quantity || 0), 0))} MT
                       </span>
                     </div>
                   </div>

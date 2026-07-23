@@ -9,7 +9,6 @@ import { createServer as createViteServer } from "vite";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { db, hashPassword, UserDB, PurchaseOrderDB, AuditLogDB } from "./src/server/db.js";
-import { runExtractionPipeline } from "./src/server/extractionEngine.js";
 
 const app = express();
 const PORT = 3000;
@@ -1840,54 +1839,6 @@ app.delete("/api/canvass/:id", authenticateToken, (req: AuthRequest, res) => {
   res.json({ success: true });
 });
 
-// COMPLIANCE DOCUMENT CONTENT EXTRACTION ROUTE
-app.post("/api/compliance/extract", authenticateToken, async (req: AuthRequest, res) => {
-  const { fileName, fileType, fileData } = req.body;
-  const user = req.user!;
-
-  if (!fileName || !fileType || !fileData) {
-    return res.status(400).json({ error: "fileName, fileType, and fileData are required." });
-  }
-
-  const startTime = Date.now();
-
-  try {
-    const extracted = await runExtractionPipeline(fileName, fileType, fileData);
-    const extractionTimeMs = Date.now() - startTime;
-
-    // Log extraction audit log per Step 5 & Step 7 requirement
-    const auditMsg = `Extracted CA Ref [${extracted.caNumber}] from file [${fileName}] using [${extracted.method}] (Confidence: ${extracted.confidence}%, Time: ${extractionTimeMs}ms, Page: ${extracted.page || "N/A"})`;
-    logAudit(
-      user.id,
-      user.username,
-      user.role,
-      "Extract CA Number",
-      "Compliance",
-      "-",
-      "-",
-      auditMsg,
-      req
-    );
-
-    res.json({
-      ...extracted,
-      audit: {
-        extractionMethod: extracted.method,
-        confidence: extracted.confidence,
-        extractionTimeMs,
-        detectedPage: extracted.page,
-        originalFilename: fileName
-      }
-    });
-  } catch (error: any) {
-    console.error("Endpoint failure in CA Number extraction:", error);
-    res.status(500).json({
-      error: "Unable to detect CA Number. Please enter it manually.",
-      details: error.message || error
-    });
-  }
-});
-
 
 // ---------------- VITE MIDDLEWARE SETUP & BOOTSTRAP ----------------
 
@@ -1903,8 +1854,19 @@ async function bootstrap() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
+    app.use(express.static(distPath, {
+      setHeaders: (res, filepath) => {
+        if (filepath.endsWith(".html")) {
+          res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+          res.setHeader("Pragma", "no-cache");
+          res.setHeader("Expires", "0");
+        }
+      }
+    }));
     app.get("*", (req, res) => {
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
       res.sendFile(path.join(distPath, "index.html"));
     });
   }

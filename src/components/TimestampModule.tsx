@@ -1,21 +1,22 @@
 import React, { useState, useEffect, useRef } from "react";
 import { 
-  Clock, 
-  Plus, 
   Trash2, 
   FileText, 
+  FileSpreadsheet,
   Image as ImageIcon,
   Calendar, 
   Search,
   X,
   CheckCircle2,
-  Camera
+  Camera,
+  ZoomIn,
+  RefreshCw
 } from "lucide-react";
 import { exportExcelWithTemplate } from "../utils/templateExport";
 
 interface TimestampRecord {
   id: string;
-  photoData: string; // base64
+  photoData: string; // base64 placeholder
   fileName: string;
   createdAt: string; // YYYY-MM-DD HH:MM:SS
   notes?: string; // Related timestamp information
@@ -38,7 +39,12 @@ export default function TimestampModule() {
   const [tempFileSize, setTempFileSize] = useState("");
   const [customDate, setCustomDate] = useState("");
 
+  // Lightbox Preview State
+  const [lightboxPhoto, setLightboxPhoto] = useState<{ src: string; title: string } | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const replaceFileInputRef = useRef<HTMLInputElement>(null);
+  const [replaceMode, setReplaceMode] = useState<"temp" | "selected">("selected");
 
   const [activePhoto, setActivePhoto] = useState<string | null>(null);
 
@@ -72,7 +78,7 @@ export default function TimestampModule() {
         console.error("Failed to parse saved timestamp records", e);
       }
     } else {
-      // Seed with some professional mock data
+      // Seed with initial mock data
       const initial: TimestampRecord[] = [
         {
           id: "TR-2026-001",
@@ -121,15 +127,22 @@ export default function TimestampModule() {
     fileInputRef.current?.click();
   };
 
+  const handleTriggerReplace = (target: "temp" | "selected") => {
+    setReplaceMode(target);
+    replaceFileInputRef.current?.click();
+  };
+
+  // Main Upload Handler (New Record)
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validation: Allowed formats
-    const allowedExtensions = ["jpg", "jpeg", "png", "webp"];
     const ext = file.name.split(".").pop()?.toLowerCase() || "";
+
+    // Validation: Allowed image formats
+    const allowedExtensions = ["jpg", "jpeg", "png", "webp"];
     if (!allowedExtensions.includes(ext) || !file.type.startsWith("image/")) {
-      alert("Invalid file format! Only images (.jpg, .jpeg, .png, .webp) are accepted.");
+      alert("Invalid file format! Only image files (.jpg, .jpeg, .png, .webp) are accepted.");
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
@@ -162,8 +175,63 @@ export default function TimestampModule() {
     };
     reader.readAsDataURL(file);
 
-    // Reset input so file change event fires even for same file
     if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  // Replacement Handler (Double-Click or Replace Action)
+  const handleReplaceFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const ext = file.name.split(".").pop()?.toLowerCase() || "";
+    const allowedExtensions = ["jpg", "jpeg", "png", "webp"];
+    if (!allowedExtensions.includes(ext) || !file.type.startsWith("image/")) {
+      alert("Invalid file format! Only image files (.jpg, .jpeg, .png, .webp) are accepted.");
+      if (replaceFileInputRef.current) replaceFileInputRef.current.value = "";
+      return;
+    }
+
+    const maxSize = 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+      alert("File size exceeds the 5MB limit. Please select a smaller image file.");
+      if (replaceFileInputRef.current) replaceFileInputRef.current.value = "";
+      return;
+    }
+
+    const sizeInKB = Math.round(file.size / 1024);
+    const sizeStr = sizeInKB > 1024 ? `${(sizeInKB / 1024).toFixed(1)} MB` : `${sizeInKB} KB`;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64Data = event.target?.result as string;
+      if (!base64Data) return;
+
+      if (replaceMode === "temp") {
+        // Replace temp photo in modal
+        setTempPhoto(base64Data);
+        setTempFileName(file.name);
+        setTempFileSize(sizeStr);
+      } else if (selectedRecordId) {
+        // Replace existing record photo immediately
+        localStorage.setItem(`tsd_photo_${selectedRecordId}`, base64Data);
+        setActivePhoto(base64Data);
+
+        const updated = records.map(r => {
+          if (r.id === selectedRecordId) {
+            return {
+              ...r,
+              fileName: file.name,
+              fileSize: sizeStr
+            };
+          }
+          return r;
+        });
+        saveToStorage(updated);
+      }
+    };
+    reader.readAsDataURL(file);
+
+    if (replaceFileInputRef.current) replaceFileInputRef.current.value = "";
   };
 
   const handleSaveRecord = () => {
@@ -176,7 +244,7 @@ export default function TimestampModule() {
 
     const newRecord: TimestampRecord = {
       id: newRecordId,
-      photoData: PLACEHOLDER_GIF, // Store tiny placeholder in the main index
+      photoData: PLACEHOLDER_GIF,
       fileName: tempFileName,
       createdAt: customDate || new Date().toISOString().replace("T", " ").substring(0, 19),
       notes: "Compliance validation photo",
@@ -195,11 +263,24 @@ export default function TimestampModule() {
     if (confirm("Are you sure you want to permanently delete this timestamp record from the compliance registry?")) {
       const updated = records.filter(r => r.id !== id);
       saveToStorage(updated);
-      localStorage.removeItem(`tsd_photo_${id}`); // Safe clean-up
+      localStorage.removeItem(`tsd_photo_${id}`);
       if (selectedRecordId === id) {
         setSelectedRecordId(updated.length > 0 ? updated[0].id : null);
       }
     }
+  };
+
+  const formatExportDate = (dateStr: string): string => {
+    if (!dateStr) return "01-01-2026";
+    const dateOnly = dateStr.split(" ")[0].split("T")[0];
+    const parts = dateOnly.split("-");
+    if (parts.length === 3) {
+      const [year, month, day] = parts;
+      if (year.length === 4) {
+        return `${month.padStart(2, "0")}-${day.padStart(2, "0")}-${year}`;
+      }
+    }
+    return dateOnly;
   };
 
   const handleExportExcel = async (record: TimestampRecord, e?: React.MouseEvent) => {
@@ -207,8 +288,11 @@ export default function TimestampModule() {
     try {
       setIsExportingId(record.id);
       
-      // On-demand resolution of the lazy photo
+      // On-demand resolution of the active photo
       const activePhotoData = localStorage.getItem(`tsd_photo_${record.id}`) || record.photoData || PLACEHOLDER_GIF;
+
+      const exportDateStr = formatExportDate(record.createdAt);
+      const exportFileName = `COPY OF TIMESTAMP ${exportDateStr}.xlsm`;
 
       await exportExcelWithTemplate(
         "TIME_STAMP_TEMPLATE.xlsm",
@@ -221,7 +305,7 @@ export default function TimestampModule() {
         },
         "items",
         [],
-        `TIMESTAMP_${record.id}.xlsm`
+        exportFileName
       );
     } catch (err) {
       console.error(err);
@@ -231,7 +315,7 @@ export default function TimestampModule() {
     }
   };
 
-  // Filter logic matching PO list design
+  // Filter logic
   const filteredRecords = records.filter(rec => {
     const matchesSearch = 
       rec.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -247,7 +331,23 @@ export default function TimestampModule() {
   return (
     <div id="smei-timestamp-portal" className="p-4 md:p-6 space-y-6 max-w-[130rem] mx-auto w-full text-slate-800 dark:text-slate-100">
       
-      {/* Upper Action Bar matching Purchase Order Portal */}
+      {/* Hidden File Inputs */}
+      <input 
+        type="file" 
+        ref={fileInputRef}
+        accept="image/*" 
+        className="hidden" 
+        onChange={handleFileChange} 
+      />
+      <input 
+        type="file" 
+        ref={replaceFileInputRef}
+        accept="image/*" 
+        className="hidden" 
+        onChange={handleReplaceFileChange} 
+      />
+
+      {/* Upper Action Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-xl md:text-2xl font-bold text-gray-800 dark:text-white tracking-tight font-display uppercase">
@@ -261,7 +361,7 @@ export default function TimestampModule() {
         {selectedRecord && (
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold text-gray-500 uppercase font-mono tracking-wider">Selected:</span>
-            <span className="text-[11px] font-bold font-mono text-smei-crimson bg-red-50 border border-red-200 px-2.5 py-1 rounded-md">
+            <span className="text-[11px] font-bold font-mono text-smei-crimson dark:text-red-400 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 px-2.5 py-1 rounded-md">
               {selectedRecord.id}
             </span>
           </div>
@@ -278,13 +378,20 @@ export default function TimestampModule() {
             <Camera className="w-4 h-4" />
             <span>Upload Timestamp Photo</span>
           </button>
-          <input 
-            type="file" 
-            ref={fileInputRef}
-            accept="image/*" 
-            className="hidden" 
-            onChange={handleFileChange} 
-          />
+
+          <button
+            onClick={(e) => selectedRecord && handleExportExcel(selectedRecord, e)}
+            disabled={!selectedRecord || isExportingId === selectedRecord?.id}
+            className={`text-xs font-semibold h-[38px] px-4 rounded-lg flex items-center justify-center gap-1.5 shadow-sm transition-all whitespace-nowrap ${
+              !selectedRecord || isExportingId === selectedRecord?.id
+                ? "bg-gray-100 dark:bg-slate-800/80 text-gray-400 dark:text-slate-500 border border-gray-200 dark:border-slate-700 cursor-not-allowed"
+                : "bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-600 hover:scale-[1.02] active:scale-95 cursor-pointer shadow-[0_2px_8px_rgba(16,185,129,0.15)]"
+            }`}
+            title={selectedRecord ? `Export ${selectedRecord.id} to Excel` : "Select a record to export"}
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>{isExportingId === selectedRecord?.id ? "Exporting..." : "Export Excel"}</span>
+          </button>
         </div>
 
         {/* Searching & Filters */}
@@ -347,13 +454,13 @@ export default function TimestampModule() {
                         onClick={() => setSelectedRecordId(rec.id)}
                         className={`cursor-pointer transition-colors ${
                           selectedRecordId === rec.id
-                            ? "bg-red-600/10 border-l-4 border-l-smei-crimson font-medium"
+                            ? "bg-red-500/10 border-l-4 border-l-smei-crimson font-medium dark:bg-red-950/30"
                             : index % 2 === 1
-                            ? "bg-gray-50/45 hover:bg-red-600/5"
-                            : "bg-white dark:bg-slate-900 hover:bg-red-600/5"
+                            ? "bg-gray-50/45 hover:bg-red-500/10 dark:hover:bg-red-950/20"
+                            : "bg-white dark:bg-slate-900 hover:bg-red-500/10 dark:hover:bg-red-950/20"
                         }`}
                       >
-                        <td className="py-3.5 px-3 font-bold text-smei-crimson dark:text-rose-400">
+                        <td className="py-3.5 px-3 font-bold text-smei-crimson dark:text-red-400">
                           {rec.id}
                         </td>
                         <td className="py-3.5 px-3 text-gray-500 dark:text-slate-400">
@@ -367,17 +474,18 @@ export default function TimestampModule() {
                         </td>
                         <td className="py-3.5 px-3 text-center" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-center gap-1">
+                            {/* GREEN Export Button */}
                             <button
                               onClick={(e) => handleExportExcel(rec, e)}
                               disabled={isExportingId === rec.id}
-                              className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 rounded-lg transition-all"
+                              className="p-1.5 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 dark:text-emerald-400 rounded-lg transition-all cursor-pointer"
                               title="Export Excel Report"
                             >
                               <FileText className="w-3.5 h-3.5" />
                             </button>
                             <button
                               onClick={(e) => handleDeleteRecord(rec.id, e)}
-                              className="p-1.5 text-gray-400 hover:text-red-600 dark:hover:text-red-400 rounded-lg transition-all"
+                              className="p-1.5 text-gray-400 hover:text-red-600 dark:hover:text-red-400 rounded-lg transition-all cursor-pointer"
                               title="Delete Photo Record"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -401,14 +509,25 @@ export default function TimestampModule() {
 
         {/* Sidebar Details Panel (Right 1 Column) */}
         <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-gray-100 dark:border-slate-800 shadow-sm space-y-4">
-          <h3 className="text-xs font-bold text-gray-400 dark:text-slate-500 font-mono uppercase tracking-widest border-b border-gray-100 dark:border-slate-800 pb-3">
-            Active Photo Inspection
-          </h3>
+          <div className="flex items-center justify-between border-b border-gray-100 dark:border-slate-800 pb-3">
+            <h3 className="text-xs font-bold text-gray-400 dark:text-slate-500 font-mono uppercase tracking-widest">
+              Active Photo Inspection
+            </h3>
+            {selectedRecord && (
+              <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400 font-bold">
+                Double-click image to replace
+              </span>
+            )}
+          </div>
 
           {selectedRecord ? (
             <div className="space-y-4">
-              {/* Photo Canvas Container */}
-              <div className="relative h-64 bg-slate-950 rounded-xl overflow-hidden border border-gray-200 dark:border-slate-800 shadow-inner group flex items-center justify-center">
+              {/* Photo Canvas Container with Preview & Double-click to Replace */}
+              <div 
+                className="relative h-64 bg-slate-950 rounded-xl overflow-hidden border border-gray-200 dark:border-slate-800 shadow-inner group flex items-center justify-center cursor-pointer select-none"
+                onDoubleClick={() => handleTriggerReplace("selected")}
+                title="Double-click to change photo • Single click to view preview"
+              >
                 <img 
                   src={activePhoto || PLACEHOLDER_GIF} 
                   alt={selectedRecord.fileName} 
@@ -416,25 +535,76 @@ export default function TimestampModule() {
                   referrerPolicy="no-referrer"
                 />
                 
+                {/* Overlay Hint on Hover */}
+                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 text-white text-xs font-semibold p-4 text-center">
+                  <div className="flex items-center gap-2">
+                    <button 
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (activePhoto) setLightboxPhoto({ src: activePhoto, title: selectedRecord.fileName });
+                      }}
+                      className="bg-black/60 hover:bg-black/80 text-white px-2.5 py-1.5 rounded-md text-[11px] font-sans flex items-center gap-1 border border-white/20 transition-all"
+                    >
+                      <ZoomIn className="w-3.5 h-3.5" />
+                      <span>Preview</span>
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleTriggerReplace("selected");
+                      }}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1.5 rounded-md text-[11px] font-sans flex items-center gap-1 transition-all"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Change Photo</span>
+                    </button>
+                  </div>
+                  <span className="text-[10px] text-slate-300 font-mono">
+                    💡 Double-click image to replace photo
+                  </span>
+                </div>
+
                 <div className="absolute bottom-3 left-3 bg-black/70 backdrop-blur-xs text-white font-mono text-[9px] px-2 py-0.5 rounded">
                   {selectedRecord.fileSize}
                 </div>
               </div>
 
-              {/* Action Buttons */}
-              <div className="flex gap-2 pt-2">
+              {/* Photo Information & Instructions */}
+              <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-lg border border-slate-100 dark:border-slate-800 text-[11px] space-y-1 font-mono">
+                <div className="flex justify-between text-slate-600 dark:text-slate-300">
+                  <span className="font-bold">Filename:</span>
+                  <span className="truncate max-w-[180px]" title={selectedRecord.fileName}>{selectedRecord.fileName}</span>
+                </div>
+                <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                  <span>Timestamp:</span>
+                  <span>{selectedRecord.createdAt}</span>
+                </div>
+              </div>
+
+              {/* Action Buttons - GREEN EXPORT BUTTON */}
+              <div className="flex gap-2 pt-1">
                 <button
                   onClick={(e) => handleExportExcel(selectedRecord, e)}
                   disabled={isExportingId === selectedRecord.id}
-                  className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white text-xs font-semibold h-[38px] rounded-lg flex items-center justify-center gap-1.5 shadow-sm transition-all hover:scale-[1.01] active:scale-95 cursor-pointer"
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 text-white text-xs font-semibold h-[38px] rounded-lg flex items-center justify-center gap-1.5 shadow-sm transition-all hover:scale-[1.01] active:scale-95 cursor-pointer font-sans"
                 >
                   <FileText className="w-4 h-4" />
                   <span>{isExportingId === selectedRecord.id ? "Exporting..." : "Export Excel Report"}</span>
                 </button>
 
                 <button
+                  onClick={() => handleTriggerReplace("selected")}
+                  className="border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 p-2.5 rounded-lg transition-all cursor-pointer bg-white dark:bg-slate-900"
+                  title="Replace Photo (Double-click image)"
+                >
+                  <RefreshCw className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                </button>
+
+                <button
                   onClick={(e) => handleDeleteRecord(selectedRecord.id, e)}
-                  className="border border-red-200 dark:border-red-900/40 hover:bg-red-50 dark:hover:bg-red-950/25 text-red-600 p-2.5 rounded-lg transition-all hover:scale-[1.01] active:scale-95 cursor-pointer bg-white dark:bg-slate-900"
+                  className="border border-red-200 dark:border-red-900/40 hover:bg-red-50 dark:hover:bg-red-950/25 text-red-600 p-2.5 rounded-lg transition-all cursor-pointer bg-white dark:bg-slate-900"
                   title="Delete Record"
                 >
                   <Trash2 className="w-4 h-4" />
@@ -473,8 +643,12 @@ export default function TimestampModule() {
             {/* Modal Body */}
             <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
               
-              {/* Photo Preview */}
-              <div className="relative h-48 bg-slate-50 dark:bg-slate-950 border border-gray-200 dark:border-slate-800 rounded-lg overflow-hidden flex items-center justify-center">
+              {/* Photo Preview with Double-click to Replace */}
+              <div 
+                className="relative h-56 bg-slate-50 dark:bg-slate-950 border border-gray-200 dark:border-slate-800 rounded-lg overflow-hidden flex items-center justify-center cursor-pointer group"
+                onDoubleClick={() => handleTriggerReplace("temp")}
+                title="Double-click to replace photo"
+              >
                 {tempPhoto && (
                   <img 
                     src={tempPhoto} 
@@ -483,12 +657,26 @@ export default function TimestampModule() {
                     referrerPolicy="no-referrer"
                   />
                 )}
+                
+                <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-semibold gap-1">
+                  <RefreshCw className="w-4 h-4" />
+                  <span>Double-click to change photo</span>
+                </div>
               </div>
 
               {/* File Info Card */}
-              <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-lg border border-gray-100 dark:border-slate-800 flex justify-between text-[11px] font-mono text-gray-500 dark:text-slate-400">
+              <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-lg border border-gray-100 dark:border-slate-800 flex justify-between items-center text-[11px] font-mono text-gray-500 dark:text-slate-400">
                 <span className="truncate max-w-[250px]" title={tempFileName}>{tempFileName}</span>
-                <span>{tempFileSize}</span>
+                <div className="flex items-center gap-3">
+                  <span>{tempFileSize}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleTriggerReplace("temp")}
+                    className="text-emerald-600 dark:text-emerald-400 hover:underline text-[10px] font-sans font-semibold cursor-pointer"
+                  >
+                    Change Photo
+                  </button>
+                </div>
               </div>
 
               {/* Timestamp Field */}
@@ -523,6 +711,47 @@ export default function TimestampModule() {
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* Lightbox Photo Preview Modal */}
+      {lightboxPhoto && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-md">
+          <div className="relative max-w-4xl w-full bg-slate-900 rounded-xl overflow-hidden border border-slate-800 flex flex-col max-h-[90vh]">
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between text-white">
+              <div className="flex items-center gap-2">
+                <ImageIcon className="w-4 h-4 text-emerald-400" />
+                <span className="text-xs font-mono font-bold">{lightboxPhoto.title}</span>
+              </div>
+              <button 
+                onClick={() => setLightboxPhoto(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 flex-1 flex items-center justify-center overflow-auto min-h-[300px]">
+              <img 
+                src={lightboxPhoto.src} 
+                alt="Enlarged Preview" 
+                className="max-w-full max-h-[70vh] object-contain rounded-lg"
+                referrerPolicy="no-referrer"
+              />
+            </div>
+
+            <div className="p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-between">
+              <span className="text-[11px] font-mono text-slate-400">
+                Double-click image in inspection panel to change photo
+              </span>
+              <button
+                onClick={() => setLightboxPhoto(null)}
+                className="bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold px-4 py-2 rounded-lg cursor-pointer"
+              >
+                Close Preview
+              </button>
+            </div>
           </div>
         </div>
       )}

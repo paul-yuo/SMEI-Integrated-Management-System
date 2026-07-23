@@ -10,6 +10,7 @@ import { Search, Plus, Filter, Calendar, FileText, ArrowUpDown, Trash2, Edit3, E
 import { exportWordWithTemplate, exportExcelWithTemplate } from "../utils/templateExport";
 import { wrapRemarks, mapPISData } from "../utils/templateMapping";
 import { ExportExcelButton, CreateButton, ExportPdfButton } from "./SharedButtons";
+import { formatControlNumber } from "../utils/controlNumber";
 import { TableSkeleton } from "./ui/Skeleton";
 
 interface PISModuleProps {
@@ -719,7 +720,7 @@ export default function PaymentInstructionSlipModule({ currentUser }: PISModuleP
                           errors.pisNumber ? "border-rose-500 bg-rose-50/20" : "border-gray-200 bg-gray-50"
                         }`}
                         value={pisNumber}
-                        onChange={(e) => setPisNumber(e.target.value.toUpperCase())}
+                        onChange={(e) => setPisNumber(formatControlNumber(e.target.value, "pisNumber"))}
                         placeholder="PURC-PIS-YY-###"
                       />
                       {errors.pisNumber && <p className="text-[10px] text-rose-500 mt-0.5 font-semibold">{errors.pisNumber}</p>}

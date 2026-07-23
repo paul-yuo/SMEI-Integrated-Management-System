@@ -790,7 +790,6 @@ export default function RoleManagement() {
                         <option value="Waste Movement">Waste Movement</option>
                         <option value="Timestamp">Timestamp</option>
                         <option value="Manifest Summary">Manifest Summary</option>
-                        <option value="TSD Summary">TSD Summary Monitoring</option>
                       </>
                     ) : (
                       <>
