@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { Lock, ShieldAlert, ArrowRight, X } from "lucide-react";
 
 interface SecurityPINModalProps {
-  moduleName: "Purchase Order" | "Request For Supply" | "Payment Instruction Slip" | "Canvass Sheet" | "Request For Supply (RFS) Approval";
+  moduleName: "Purchase Order" | "Request For Supply" | "Payment Instruction Slip" | "Canvass Sheet";
   onSuccess: () => void;
   onClose: () => void;
 }
@@ -34,7 +34,6 @@ export default function SecurityPINModal({ moduleName, onSuccess, onClose }: Sec
       // Defaults
       if (moduleName === "Purchase Order") return "1234";
       if (moduleName === "Request For Supply") return "5678";
-      if (moduleName === "Request For Supply (RFS) Approval") return "7777";
       if (moduleName === "Payment Instruction Slip") return "4321";
       if (moduleName === "Canvass Sheet") return "9999";
       return "1234"; // Default fallback

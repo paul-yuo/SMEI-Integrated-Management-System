@@ -98,9 +98,12 @@ export function getAllManifestRecords(): ManifestRecord[] {
     const rawDocs = localStorage.getItem("tsd_uploaded_compliance_docs");
     const activeDocs = rawDocs ? (JSON.parse(rawDocs) as { id: string; caNumber: string }[]) : [];
 
+    console.log(`[FORENSIC STAGE 8] getAllManifestRecords: raw storage count=${records.length}, active compliance docs count=${activeDocs.length}`);
+
     // If Control No. Module has no uploaded files, no manifest records should exist
     if (!activeDocs || activeDocs.length === 0) {
       if (records.length > 0) {
+        console.log(`[FORENSIC STAGE 8] Active docs empty. Removing all ${records.length} stored manifest records.`);
         localStorage.removeItem(STORAGE_KEY);
       }
       return [];
@@ -115,15 +118,20 @@ export function getAllManifestRecords(): ManifestRecord[] {
       const hasValidDocId = rec.docId ? validDocIds.has(rec.docId) : false;
       const hasValidCaNo = rec.controlNo ? validCaNumbers.has(rec.controlNo) : false;
       
-      // Exclude orphan records or unlinked dummy/placeholder files
-      return hasValidDocId || hasValidCaNo;
+      const isValid = hasValidDocId || hasValidCaNo;
+      if (!isValid) {
+        console.log(`[FORENSIC STAGE 8] PURGE EVENT: record id=${rec.id}, docId=${rec.docId}, controlNo=${rec.controlNo} has no matching active docId or CA No.`);
+      }
+      return isValid;
     });
 
     // If orphan or dummy records were filtered out, persist the cleaned list
     if (validRecords.length !== records.length) {
+      console.log(`[FORENSIC STAGE 8] Purged ${records.length - validRecords.length} orphan manifest records.`);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(validRecords));
     }
 
+    console.log(`[FORENSIC STAGE 7 & 8] getAllManifestRecords: returned ${validRecords.length} valid records (from ${activeDocs.length} active docs).`);
     return validRecords;
   } catch (err) {
     console.error("[ManifestStorage] Failed to retrieve manifest records:", err);
@@ -153,36 +161,55 @@ export function saveManifestRecord(record: ManifestRecord): {
 } {
   const records = getAllManifestRecords();
 
-  // Check duplicate by docId, id, or manifestNo
-  const existingIndex = records.findIndex(
-    (r) =>
-      (record.docId && r.docId === record.docId) ||
-      (r.id === record.id) ||
-      (r.manifestNo && record.manifestNo && r.manifestNo.trim().toUpperCase() === record.manifestNo.trim().toUpperCase() && record.manifestNo.trim().length > 0)
-  );
+  const cleanedQuantity =
+    record.quantity !== undefined &&
+    record.quantity !== null &&
+    record.quantity !== ("" as any) &&
+    !isNaN(Number(record.quantity))
+      ? Number(record.quantity)
+      : 0;
+
+  const sanitizedRecord: ManifestRecord = {
+    ...record,
+    quantity: cleanedQuantity,
+  };
+
+  // Priority duplicate check: document identity (docId or id)
+  // Two different uploaded PDF documents must NEVER overwrite each other merely because manifestNo is similar or empty.
+  const existingIndex = records.findIndex((r) => {
+    if (sanitizedRecord.docId && r.docId === sanitizedRecord.docId) {
+      return true;
+    }
+    if (r.id === sanitizedRecord.id) {
+      return true;
+    }
+    return false;
+  });
 
   if (existingIndex >= 0) {
-    // Check if updating
+    // Check if updating existing record for same document
     records[existingIndex] = {
       ...records[existingIndex],
-      ...record,
+      ...sanitizedRecord,
       updatedAt: new Date().toISOString(),
     };
     saveAllManifestRecords(records);
+    console.log(`[FORENSIC STAGE 6] saveManifestRecord (UPDATE OVERWRITE): docId=${sanitizedRecord.docId}, id=${sanitizedRecord.id}, controlNo=${sanitizedRecord.controlNo}, totalRecordsNow=${records.length}`);
     return {
       success: true,
       isDuplicate: true,
-      message: `Manifest ${record.manifestNo || record.controlNo} updated successfully.`,
+      message: `Manifest ${sanitizedRecord.manifestNo || sanitizedRecord.controlNo} updated successfully.`,
       updatedRecords: records,
     };
   }
 
-  records.unshift(record);
+  records.unshift(sanitizedRecord);
   saveAllManifestRecords(records);
+  console.log(`[FORENSIC STAGE 6] saveManifestRecord (NEW INSERT): docId=${sanitizedRecord.docId}, id=${sanitizedRecord.id}, controlNo=${sanitizedRecord.controlNo}, totalRecordsNow=${records.length}`);
   return {
     success: true,
     isDuplicate: false,
-    message: `Manifest ${record.manifestNo || record.controlNo} added successfully.`,
+    message: `Manifest ${sanitizedRecord.manifestNo || sanitizedRecord.controlNo} added successfully.`,
     updatedRecords: records,
   };
 }
@@ -215,6 +242,11 @@ export function getWeeklyManifestGroups(): WeeklyManifestGroup[] {
     b.weekStart.localeCompare(a.weekStart)
   );
 
+  console.log(`[FORENSIC STAGE 9] getWeeklyManifestGroups: Total stored records=${records.length} distributed into ${sorted.length} weekly group(s):`);
+  sorted.forEach((g) => {
+    console.log(`  - Week ID: ${g.weekId} (${g.formattedWeekRange}): ${g.records.length} records`);
+  });
+
   return sorted;
 }
 
@@ -237,3 +269,42 @@ export function deleteManifestRecordByDocId(docId: string): ManifestRecord[] {
   saveAllManifestRecords(filtered);
   return filtered;
 }
+
+/**
+ * Calculates the exact sheet name in MONTH ORDINAL format (e.g. JAN 1ST, JAN 2ND, FEB 1ST, JUL 2ND)
+ * for a weekly group among a sorted array of weekly groups.
+ */
+export function getWeeklySheetName(
+  group: WeeklyManifestGroup,
+  allGroupsSortedAsc: WeeklyManifestGroup[]
+): string {
+  const d = new Date(group.weekStart);
+  if (isNaN(d.getTime())) {
+    return "SHEET";
+  }
+  const year = d.getFullYear();
+  const monthIdx = d.getMonth();
+
+  const monthNames = [
+    "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+    "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"
+  ];
+  const monthAbbr = monthNames[monthIdx];
+
+  const monthGroups = allGroupsSortedAsc.filter((g) => {
+    const gd = new Date(g.weekStart);
+    return !isNaN(gd.getTime()) && gd.getFullYear() === year && gd.getMonth() === monthIdx;
+  });
+
+  const indexInMonth = monthGroups.findIndex((g) => g.weekId === group.weekId) + 1;
+  const ordinalIdx = indexInMonth > 0 ? indexInMonth : 1;
+
+  const getOrdinalSuffix = (n: number): string => {
+    const s = ["TH", "ST", "ND", "RD"];
+    const v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+  };
+
+  return `${monthAbbr} ${getOrdinalSuffix(ordinalIdx)}`;
+}
+

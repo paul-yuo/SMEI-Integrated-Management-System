@@ -4,8 +4,15 @@
  */
 
 import React, { useState, useEffect, lazy, Suspense } from "react";
-import { User, UserRole, PurchaseOrder, Supplier, AuditLog, Notification } from "./types";
+import { User, UserRole, PurchaseOrder, Supplier, AuditLog, Notification, PaymentInstructionSlip, RequestForSupply, CanvassSheet } from "./types";
 import { api, removeToken } from "./lib/api";
+import {
+  getAllowedPendingDocumentTypes,
+  isPOPending,
+  isPISPending,
+  isRFSPending,
+  isCanvassPending
+} from "./utils/pendingDocumentUtils";
 import Header, { PrintHeader } from "./components/Header";
 import Login from "./components/Login";
 import Register from "./components/Register";
@@ -29,14 +36,16 @@ const POList = lazy(() => import("./components/POList"));
 const POForm = lazy(() => import("./components/POForm"));
 const PaymentInstructionSlipModule = lazy(() => import("./components/PaymentInstructionSlipModule"));
 const RequestForSupplyModule = lazy(() => import("./components/RequestForSupplyModule"));
-const RfsApprovalModule = lazy(() => import("./components/RfsApprovalModule"));
 const CanvassSheetModule = lazy(() => import("./components/CanvassSheetModule"));
+const ProcurementApprovalModule = lazy(() => import("./components/ProcurementApprovalModule").then(m => ({ default: m.ProcurementApprovalModule })));
 const ControlNoModule = lazy(() => import("./components/ControlNoModule"));
 const UnloadingLoadingModule = lazy(() => import("./components/UnloadingLoadingModule"));
 const HazardousWasteModule = lazy(() => import("./components/HazardousWasteModule"));
 const WasteMovementModule = lazy(() => import("./components/WasteMovementModule"));
 const TimestampModule = lazy(() => import("./components/TimestampModule"));
 const ManifestSummaryModule = lazy(() => import("./components/ManifestSummaryModule"));
+const SystemMonitoringModule = lazy(() => import("./components/SystemMonitoringModule"));
+const COAWorkflowTracker = lazy(() => import("./components/COAWorkflowTracker"));
 
 // Compact high-contrast module loader matching POMS design language
 const ModuleLoader = () => (
@@ -74,6 +83,9 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [greetingMessage, setGreetingMessage] = useState<string | null>(null);
   const [pos, setPOs] = useState<PurchaseOrder[]>([]);
+  const [pises, setPises] = useState<PaymentInstructionSlip[]>([]);
+  const [rfses, setRfses] = useState<RequestForSupply[]>([]);
+  const [canvasses, setCanvasses] = useState<CanvassSheet[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -93,12 +105,12 @@ export default function App() {
 
   // Central Security Gate state
   const [securityChallenge, setSecurityChallenge] = useState<{
-    moduleName: "Purchase Order" | "Request For Supply" | "Payment Instruction Slip" | "Canvass Sheet" | "Request For Supply (RFS) Approval";
+    moduleName: "Purchase Order" | "Request For Supply" | "Payment Instruction Slip" | "Canvass Sheet" | "Procurement Approval";
     onSuccess: () => void;
   } | null>(null);
 
   const checkModuleAccess = (
-    moduleName: "Purchase Order" | "Request For Supply" | "Payment Instruction Slip" | "Canvass Sheet" | "Request For Supply (RFS) Approval",
+    moduleName: "Purchase Order" | "Request For Supply" | "Payment Instruction Slip" | "Canvass Sheet" | "Procurement Approval",
     onSuccess: () => void
   ) => {
     // 1. Admin always bypasses security
@@ -218,16 +230,30 @@ export default function App() {
     if (!currentUser) return;
     try {
       const isAdmin = currentUser.role === UserRole.Administrator;
-      const [fetchedPOs, fetchedSuppliers, fetchedNotifs, fetchedLogs] = await Promise.all([
-        api.getPOs(),
-        api.getSuppliers(),
-        api.getNotifications(),
-        isAdmin ? api.getAuditLogs() : Promise.resolve([])
+      const [
+        fetchedPOs,
+        fetchedSuppliers,
+        fetchedNotifs,
+        fetchedLogs,
+        fetchedPIS,
+        fetchedRFS,
+        fetchedCanvass
+      ] = await Promise.all([
+        api.getPOs().catch(() => []),
+        api.getSuppliers().catch(() => []),
+        api.getNotifications().catch(() => []),
+        isAdmin ? api.getAuditLogs().catch(() => []) : Promise.resolve([]),
+        api.getPIS().catch(() => []),
+        api.getRFS().catch(() => []),
+        api.getCanvass().catch(() => [])
       ]);
       
       setPOs(fetchedPOs);
       setSuppliers(fetchedSuppliers);
       setNotifications(fetchedNotifs);
+      setPises(fetchedPIS);
+      setRfses(fetchedRFS);
+      setCanvasses(fetchedCanvass);
       if (isAdmin) {
         setAuditLogs(fetchedLogs);
       }
@@ -247,7 +273,6 @@ export default function App() {
     sessionStorage.removeItem("smei_session_unlocked");
     sessionStorage.removeItem("smei_unlocked_Purchase Order");
     sessionStorage.removeItem("smei_unlocked_Request For Supply");
-    sessionStorage.removeItem("smei_unlocked_Request For Supply (RFS) Approval");
     sessionStorage.removeItem("smei_unlocked_Payment Instruction Slip");
     sessionStorage.removeItem("smei_unlocked_Canvass Sheet");
   }, [currentUser]);
@@ -403,6 +428,16 @@ export default function App() {
     }
   };
 
+  const handleClearReadNotif = async () => {
+    try {
+      await api.clearReadNotifications();
+      await loadAllData();
+    } catch (err) {
+      console.error(err);
+      throw err;
+    }
+  };
+
   const handleSelectPOFromNotif = (poId: string) => {
     const found = pos.find((p) => p.id === poId);
     if (found) {
@@ -419,10 +454,23 @@ export default function App() {
     alert("Audit log deletion is prohibited by corporate policy to maintain compliance records.");
   };
 
+  // Single Source of Truth for Role-Based Pending Approval Documents & Header Badge Count
+  const allowedDocTypes = getAllowedPendingDocumentTypes(currentUser?.role);
+
+  const pendingPOsCount = allowedDocTypes.includes("PO") ? pos.filter(isPOPending).length : 0;
+  const pendingPISCount = allowedDocTypes.includes("PIS") ? pises.filter(isPISPending).length : 0;
+  const pendingRFSCount = allowedDocTypes.includes("RFS") ? rfses.filter(isRFSPending).length : 0;
+  const pendingCanvassCount = allowedDocTypes.includes("CANVASS") ? canvasses.filter(isCanvassPending).length : 0;
+
+  const totalPendingApprovalDocsCount =
+    pendingPOsCount + pendingPISCount + pendingRFSCount + pendingCanvassCount;
+
   // Unread Alerts Count
   const unreadAlertsCount = currentUser
     ? notifications.filter((n) => n.userId === currentUser.id && !n.isRead).length
     : 0;
+
+  const totalHeaderBadgeCount = totalPendingApprovalDocsCount + unreadAlertsCount;
 
   // Dynamic Menu Items (Purged Demo switch)
   const getRoleMenuItems = (role: UserRole) => {
@@ -456,7 +504,7 @@ export default function App() {
           { name: "Payment Instruction Slip", key: "pis", icon: "pis" },
           { name: "Request for Supply", key: "rfs", icon: "rfs" },
           { name: "Canvass Sheet", key: "canvass", icon: "canvass" },
-          { name: "RFS Approval", key: "rfs-approval", icon: "check" },
+          { name: "Procurement Approval", key: "procurement-approval", icon: "check" },
           { name: "Supplier Registry", key: "suppliers", icon: "users" },
           { name: "Supplier Summary", key: "supplier-report", icon: "reports" },
           { name: "Supplier Analytics", key: "supplier-analytics", icon: "reports" },
@@ -471,7 +519,7 @@ export default function App() {
           { name: "Payment Instruction Slip", key: "pis", icon: "pis" },
           { name: "Request for Supply", key: "rfs", icon: "rfs" },
           { name: "Canvass Sheet", key: "canvass", icon: "canvass" },
-          { name: "RFS Approval", key: "rfs-approval", icon: "check" },
+          { name: "Procurement Approval", key: "procurement-approval", icon: "check" },
           { name: "Supplier Registry", key: "suppliers", icon: "users" },
           { name: "Supplier Summary", key: "supplier-report", icon: "reports" },
           { name: "Supplier Analytics", key: "supplier-analytics", icon: "reports" },
@@ -485,6 +533,7 @@ export default function App() {
           { name: "Payment Instruction Slip", key: "pis", icon: "pis" },
           { name: "Request for Supply", key: "rfs", icon: "rfs" },
           { name: "Canvass Sheet", key: "canvass", icon: "canvass" },
+          { name: "Procurement Approval", key: "procurement-approval", icon: "check" },
           { name: "Approval Queue", key: "approval-queue", icon: "queue" },
         ];
       case UserRole.AccountingStaff:
@@ -494,6 +543,7 @@ export default function App() {
           { name: "Payment Instruction Slip", key: "pis", icon: "pis" },
           { name: "Request for Supply", key: "rfs", icon: "rfs" },
           { name: "Canvass Sheet", key: "canvass", icon: "canvass" },
+          { name: "Procurement Approval", key: "procurement-approval", icon: "check" },
           { name: "Supplier Registry", key: "suppliers", icon: "users" },
           { name: "Supplier Summary", key: "supplier-report", icon: "reports" },
           { name: "Supplier Analytics", key: "supplier-analytics", icon: "reports" },
@@ -505,6 +555,7 @@ export default function App() {
           { name: "Payment Instruction Slip", key: "pis", icon: "pis" },
           { name: "Request for Supply", key: "rfs", icon: "rfs" },
           { name: "Canvass Sheet", key: "canvass", icon: "canvass" },
+          { name: "Procurement Approval", key: "procurement-approval", icon: "check" },
           { name: "Supplier Registry", key: "suppliers", icon: "users" },
           { name: "Supplier Summary", key: "supplier-report", icon: "reports" },
           { name: "Supplier Analytics", key: "supplier-analytics", icon: "reports" },
@@ -516,6 +567,7 @@ export default function App() {
           { name: "Payment Instruction Slip", key: "pis", icon: "pis" },
           { name: "Request for Supply", key: "rfs", icon: "rfs" },
           { name: "Canvass Sheet", key: "canvass", icon: "canvass" },
+          { name: "Procurement Approval", key: "procurement-approval", icon: "check" },
           { name: "Supplier Registry", key: "suppliers", icon: "users" },
           { name: "Supplier Summary", key: "supplier-report", icon: "reports" },
           { name: "Supplier Analytics", key: "supplier-analytics", icon: "reports" },
@@ -538,12 +590,12 @@ export default function App() {
     return true;
   };
 
-  const getModuleForTab = (tab: string): "Purchase Order" | "Request For Supply" | "Payment Instruction Slip" | "Canvass Sheet" | "Request For Supply (RFS) Approval" | null => {
+  const getModuleForTab = (tab: string): "Purchase Order" | "Request For Supply" | "Payment Instruction Slip" | "Canvass Sheet" | "Procurement Approval" | null => {
     if (tab === "po-list" || tab === "po-form") return "Purchase Order";
     if (tab === "pis") return "Payment Instruction Slip";
     if (tab === "rfs") return "Request For Supply";
-    if (tab === "rfs-approval") return "Request For Supply (RFS) Approval";
     if (tab === "canvass") return "Canvass Sheet";
+    if (tab === "procurement-approval") return "Procurement Approval";
     return null;
   };
 
@@ -562,8 +614,8 @@ export default function App() {
     else if (menuKey === "po-all" || menuKey === "po-review" || menuKey === "approval-queue" || menuKey === "verification-queue" || menuKey === "final-approval-queue" || menuKey === "excel-import" || menuKey === "excel-export") targetTab = "po-list";
     else if (menuKey === "pis") targetTab = "pis";
     else if (menuKey === "rfs") targetTab = "rfs";
-    else if (menuKey === "rfs-approval") targetTab = "rfs-approval";
     else if (menuKey === "canvass") targetTab = "canvass";
+    else if (menuKey === "procurement-approval") targetTab = "procurement-approval";
     else if (menuKey === "suppliers") targetTab = "suppliers";
     else if (menuKey === "supplier-report") targetTab = "supplier-report";
     else if (menuKey === "supplier-analytics") targetTab = "supplier-analytics";
@@ -599,10 +651,10 @@ export default function App() {
         setCurrentTab("pis");
       } else if (menuKey === "rfs") {
         setCurrentTab("rfs");
-      } else if (menuKey === "rfs-approval") {
-        setCurrentTab("rfs-approval");
       } else if (menuKey === "canvass") {
         setCurrentTab("canvass");
+      } else if (menuKey === "procurement-approval") {
+        setCurrentTab("procurement-approval");
       } else if (menuKey === "suppliers") {
         setCurrentTab("suppliers");
       } else if (menuKey === "supplier-report") {
@@ -696,8 +748,8 @@ export default function App() {
     if (menuKey === "manifest-summary") return currentTab === "manifest-summary";
     if (menuKey === "pis") return currentTab === "pis";
     if (menuKey === "rfs") return currentTab === "rfs";
-    if (menuKey === "rfs-approval") return currentTab === "rfs-approval";
     if (menuKey === "canvass") return currentTab === "canvass";
+    if (menuKey === "procurement-approval") return currentTab === "procurement-approval";
     if (menuKey === "suppliers") return currentTab === "suppliers";
     if (menuKey === "supplier-report") return currentTab === "supplier-report";
     if (menuKey === "supplier-analytics") return currentTab === "supplier-analytics";
@@ -1028,7 +1080,7 @@ export default function App() {
             }
           }}
           currentTab={currentTab}
-          unreadCount={unreadAlertsCount}
+          unreadCount={totalHeaderBadgeCount}
           onOpenNotifications={() => setIsNotificationsOpen(true)}
           onOpenProfile={(section) => {
             setProfileModalSection(section);
@@ -1040,7 +1092,6 @@ export default function App() {
             if (checkUnsavedChanges()) {
               setActiveSystem(null);
               localStorage.removeItem("smei_active_system");
-              sessionStorage.removeItem("smei_portal_unlocked");
             }
           }}
         />
@@ -1098,25 +1149,22 @@ export default function App() {
                 )
               )}
 
-              {currentTab === "control-no" && (
-                <ControlNoModule />
-              )}
-
-              {currentTab === "unloading-loading" && (
-                <UnloadingLoadingModule />
-              )}
-
-              {currentTab === "hazardous-waste" && (
-                <HazardousWasteModule />
-              )}
-
-              {currentTab === "waste-movement" && (
-                <WasteMovementModule />
-              )}
-
-              {currentTab === "timestamp" && (
-                <TimestampModule />
-              )}
+              {["control-no", "unloading-loading", "hazardous-waste", "waste-movement", "timestamp"].includes(currentTab) ? (
+                <div className="flex flex-col xl:flex-row items-start gap-6 w-full max-w-[1600px] mx-auto">
+                  <div className="flex-1 min-w-0 w-full">
+                    {currentTab === "control-no" && <ControlNoModule />}
+                    {currentTab === "unloading-loading" && <UnloadingLoadingModule />}
+                    {currentTab === "hazardous-waste" && <HazardousWasteModule />}
+                    {currentTab === "waste-movement" && <WasteMovementModule />}
+                    {currentTab === "timestamp" && <TimestampModule />}
+                  </div>
+                  <COAWorkflowTracker
+                    activeTab={currentTab}
+                    onNavigate={(tab) => setCurrentTab(tab)}
+                    currentUser={currentUser}
+                  />
+                </div>
+              ) : null}
 
               {currentTab === "manifest-summary" && (
                 <ManifestSummaryModule />
@@ -1187,17 +1235,17 @@ export default function App() {
                 </ModuleSecurityGate>
               )}
 
-              {currentTab === "rfs-approval" && (
-                <ModuleSecurityGate moduleName="Request For Supply (RFS) Approval" currentUser={currentUser}>
-                  <RfsApprovalModule
+              {currentTab === "canvass" && (
+                <ModuleSecurityGate moduleName="Canvass Sheet" currentUser={currentUser}>
+                  <CanvassSheetModule
                     currentUser={currentUser}
                   />
                 </ModuleSecurityGate>
               )}
 
-              {currentTab === "canvass" && (
-                <ModuleSecurityGate moduleName="Canvass Sheet" currentUser={currentUser}>
-                  <CanvassSheetModule
+              {currentTab === "procurement-approval" && (
+                <ModuleSecurityGate moduleName="Procurement Approval" currentUser={currentUser}>
+                  <ProcurementApprovalModule
                     currentUser={currentUser}
                   />
                 </ModuleSecurityGate>
@@ -1244,13 +1292,28 @@ export default function App() {
           currentUser={currentUser}
           onMarkAsRead={handleMarkNotifRead}
           onMarkAllAsRead={handleMarkAllNotifRead}
+          onClearReadNotifications={handleClearReadNotif}
           onSelectPO={handleSelectPOFromNotif}
+          onNavigate={(tab) => {
+            const targetModule = getModuleForTab(tab);
+            if (targetModule) {
+              checkModuleAccess(targetModule, () => {
+                setSelectedPO(null);
+                setShowPOForm(false);
+                setCurrentTab(tab);
+              });
+            } else {
+              setSelectedPO(null);
+              setShowPOForm(false);
+              setCurrentTab(tab);
+            }
+          }}
         />
 
         {/* 5. App Footer (Hidden on Print) */}
         <footer id="smei-poms-footer" className="bg-white border-t border-gray-100 dark:bg-neutral-950 dark:border-neutral-900 py-4 px-6 md:px-12 text-center text-[10px] text-gray-400 dark:text-neutral-500 font-mono flex flex-col sm:flex-row items-center justify-between gap-2 no-print transition-colors duration-300">
           <div>
-            © 2026 SOUTHCOAST METAL ENTERPRISE, INC. • POMS SECURED TERMINAL
+            © 2026 SMEI Management System Developed by <span className="animate-pulse font-bold text-gray-600 dark:text-neutral-300">Paul Joseph Salgado</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="inline-block w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />

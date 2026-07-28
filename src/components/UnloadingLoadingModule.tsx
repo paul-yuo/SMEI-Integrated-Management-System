@@ -12,7 +12,7 @@ import {
   X
 } from "lucide-react";
 import { exportExcelWithTemplate } from "../utils/templateExport";
-import { ExportExcelButton } from "./SharedButtons";
+import { ExportExcelButton, CreateButton } from "./SharedButtons";
 import { validateManifestNumber } from "../utils/manifestHelper";
 import { formatControlNumber } from "../utils/controlNumber";
 
@@ -126,6 +126,7 @@ export default function UnloadingLoadingModule() {
   const saveCompToStorage = (updated: ComplianceRecord[]) => {
     setCompRecords(updated);
     localStorage.setItem("tsd_compliance_records", JSON.stringify(updated));
+    window.dispatchEvent(new Event("tsd_data_changed"));
   };
 
   const processUnloadingFile = (file: File) => {
@@ -388,13 +389,10 @@ export default function UnloadingLoadingModule() {
       {/* Standard Management Toolbar */}
       <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-gray-100 dark:border-slate-800 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-2">
-          <button
+          <CreateButton
             onClick={handleCreateNew}
-            className="bg-smei-crimson hover:bg-smei-darkred text-white text-xs font-semibold h-[38px] px-4 rounded-lg flex items-center justify-center gap-1.5 shadow-sm transition-all hover:scale-[1.02] active:scale-95 cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>+ New Unloading / Loading Log</span>
-          </button>
+            label="+ New Unloading / Loading Log"
+          />
 
           <ExportExcelButton
             onClick={handleExportExcelSelected}
@@ -514,7 +512,15 @@ export default function UnloadingLoadingModule() {
                   ) : (
                     <tr>
                       <td colSpan={5} className="py-12 text-center text-gray-400 dark:text-slate-500">
-                        No records found. Click "+ New Unloading / Loading Log" to create a new record.
+                        <span>No records found. Click </span>
+                        <button
+                          type="button"
+                          onClick={handleCreateNew}
+                          className="text-smei-crimson dark:text-rose-400 font-bold hover:underline cursor-pointer inline-flex items-center gap-1 mx-1"
+                        >
+                          + New Unloading / Loading Log
+                        </button>
+                        <span> to create a new record.</span>
                       </td>
                     </tr>
                   )}
@@ -638,7 +644,7 @@ export default function UnloadingLoadingModule() {
 
       {/* Form Dialog Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[100] bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 rounded-xl shadow-xl border border-gray-100 dark:border-slate-800 max-w-lg w-full overflow-hidden animate-fadeIn flex flex-col max-h-[90vh]">
             
             {/* Modal Header */}
@@ -647,6 +653,7 @@ export default function UnloadingLoadingModule() {
                 <span>NEW UNLOADING/LOADING LOG</span>
               </h3>
               <button 
+                type="button"
                 onClick={() => setIsModalOpen(false)}
                 className="text-gray-400 hover:text-gray-600 dark:hover:text-slate-200 p-1 rounded-full hover:bg-gray-50 dark:hover:bg-slate-800 cursor-pointer"
               >

@@ -112,7 +112,11 @@ export const api = {
     return apiFetch<User[]>("/api/users");
   },
 
-  async createUser(userData: Partial<User> & { password?: string }): Promise<User> {
+  async getNextEmployeeId(): Promise<{ nextEmployeeId: string }> {
+    return apiFetch<{ nextEmployeeId: string }>("/api/users/next-employee-id");
+  },
+
+  async createUser(userData: Partial<User> & { password?: string; employeeId?: string }): Promise<User> {
     return apiFetch<User>("/api/users", {
       method: "POST",
       body: JSON.stringify(userData)
@@ -123,6 +127,12 @@ export const api = {
     return apiFetch<User>(`/api/users/${id}`, {
       method: "PUT",
       body: JSON.stringify(userData)
+    });
+  },
+
+  async deleteUser(id: string): Promise<{ success: boolean; message: string }> {
+    return apiFetch<{ success: boolean; message: string }>(`/api/users/${id}`, {
+      method: "DELETE"
     });
   },
 
@@ -286,6 +296,10 @@ export const api = {
     return apiFetch<void>("/api/notifications/read-all", { method: "PUT" });
   },
 
+  async clearReadNotifications(): Promise<{ success: boolean; count?: number }> {
+    return apiFetch<{ success: boolean; count?: number }>("/api/notifications/clear-read", { method: "DELETE" });
+  },
+
   // User Profile
   async updateProfile(profileData: {
     firstName?: string;
@@ -427,6 +441,108 @@ export const api = {
   async deleteCanvass(id: string): Promise<{ success: boolean }> {
     return apiFetch<{ success: boolean }>(`/api/canvass/${id}`, {
       method: "DELETE"
+    });
+  },
+
+  // Centralized Procurement Approval
+  async approveProcurementDocument(docType: string, docId: string, extraData?: Record<string, any>): Promise<{ success: boolean; document: any }> {
+    return apiFetch<{ success: boolean; document: any }>(`/api/procurement-approvals/${docType}/${docId}/approve`, {
+      method: "POST",
+      body: JSON.stringify(extraData || {})
+    });
+  },
+
+  async rejectProcurementDocument(docType: string, docId: string, reason: string): Promise<{ success: boolean; document: any }> {
+    return apiFetch<{ success: boolean; document: any }>(`/api/procurement-approvals/${docType}/${docId}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ reason })
+    });
+  },
+
+  async logProcurementView(docType: string, docId: string): Promise<{ success: boolean }> {
+    return apiFetch<{ success: boolean }>(`/api/procurement-approvals/${docType}/${docId}/log-view`, {
+      method: "POST"
+    });
+  },
+
+  async exportProcurementDocument(docType: string, docId: string): Promise<{ success: boolean; document: any }> {
+    return apiFetch<{ success: boolean; document: any }>(`/api/procurement-approvals/${docType}/${docId}/export`, {
+      method: "POST"
+    });
+  },
+
+  async addProcurementSignatureNote(docType: string, docId: string, note: string, signatureType: "APPROVAL" | "NOTE" | "SIGNATURE" = "NOTE"): Promise<{ success: boolean; document: any }> {
+    return apiFetch<{ success: boolean; document: any }>(`/api/procurement-approvals/${docType}/${docId}/signature-note`, {
+      method: "POST",
+      body: JSON.stringify({ note, signatureType })
+    });
+  },
+
+  // ==========================================
+  // SYSTEM RESOURCE & STORAGE MONITORING
+  // ==========================================
+
+  async getMonitoringOverview(): Promise<import("../types").MonitoringOverviewData> {
+    return apiFetch<import("../types").MonitoringOverviewData>("/api/monitoring/overview");
+  },
+
+  async getMonitoringFiles(params?: {
+    portal?: string;
+    documentType?: string;
+    status?: string;
+    search?: string;
+    sortBy?: string;
+    sortOrder?: "asc" | "desc";
+  }): Promise<import("../types").MonitoringFileRecord[]> {
+    const query = new URLSearchParams();
+    if (params) {
+      if (params.portal) query.set("portal", params.portal);
+      if (params.documentType) query.set("documentType", params.documentType);
+      if (params.status) query.set("status", params.status);
+      if (params.search) query.set("search", params.search);
+      if (params.sortBy) query.set("sortBy", params.sortBy);
+      if (params.sortOrder) query.set("sortOrder", params.sortOrder);
+    }
+    const qStr = query.toString();
+    return apiFetch<import("../types").MonitoringFileRecord[]>(`/api/monitoring/files${qStr ? `?${qStr}` : ""}`);
+  },
+
+  async syncMonitoringFiles(files: import("../types").MonitoringFileRecord[]): Promise<{ success: boolean; count: number }> {
+    return apiFetch<{ success: boolean; count: number }>("/api/monitoring/files/sync", {
+      method: "POST",
+      body: JSON.stringify({ files })
+    });
+  },
+
+  async registerMonitoringFile(file: import("../types").MonitoringFileRecord): Promise<{ success: boolean; file: import("../types").MonitoringFileRecord }> {
+    return apiFetch<{ success: boolean; file: import("../types").MonitoringFileRecord }>("/api/monitoring/files", {
+      method: "POST",
+      body: JSON.stringify(file)
+    });
+  },
+
+  async deleteMonitoringFile(id: string): Promise<{ success: boolean; message: string }> {
+    return apiFetch<{ success: boolean; message: string }>(`/api/monitoring/files/${id}`, {
+      method: "DELETE"
+    });
+  },
+
+  async getMonitoringHistory(): Promise<{ snapshots: import("../types").MonitoringSnapshot[]; operationsLog: import("../types").MonitoringOperationLog[] }> {
+    return apiFetch<{ snapshots: import("../types").MonitoringSnapshot[]; operationsLog: import("../types").MonitoringOperationLog[] }>("/api/monitoring/history");
+  },
+
+  async getMonitoringForecast(): Promise<any> {
+    return apiFetch<any>("/api/monitoring/forecast");
+  },
+
+  async getMonitoringSettings(): Promise<import("../types").MonitoringSettings> {
+    return apiFetch<import("../types").MonitoringSettings>("/api/monitoring/settings");
+  },
+
+  async updateMonitoringSettings(settings: Partial<import("../types").MonitoringSettings>): Promise<{ success: boolean; settings: import("../types").MonitoringSettings }> {
+    return apiFetch<{ success: boolean; settings: import("../types").MonitoringSettings }>("/api/monitoring/settings", {
+      method: "PUT",
+      body: JSON.stringify(settings)
     });
   }
 };

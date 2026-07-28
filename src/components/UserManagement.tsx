@@ -23,7 +23,8 @@ import {
   Link,
   Copy,
   Mail,
-  QrCode
+  QrCode,
+  Trash2
 } from "lucide-react";
 
 export default function UserManagement() {
@@ -119,8 +120,14 @@ export default function UserManagement() {
     if (!formData.fullName) newErrors.fullName = "Full Name is required.";
     if (!formData.email) newErrors.email = "Email Address is required.";
 
-    if (users.some(u => u.employeeId === formData.employeeId)) {
-      newErrors.employeeId = `Employee ID ${formData.employeeId} already exists.`;
+    let formattedEmpId = formData.employeeId.trim();
+    if (formattedEmpId && !formattedEmpId.startsWith("SMEI-EMPLOYEE-")) {
+      const digits = formattedEmpId.replace(/\D/g, '');
+      formattedEmpId = `SMEI-EMPLOYEE-${digits.padStart(3, '0')}`;
+    }
+
+    if (users.some(u => u.employeeId && u.employeeId.toLowerCase() === formattedEmpId.toLowerCase())) {
+      newErrors.employeeId = `Employee ID ${formattedEmpId} already exists.`;
     }
 
     if (Object.keys(newErrors).length > 0) {
@@ -130,7 +137,7 @@ export default function UserManagement() {
 
     try {
       await api.createUser({
-        employeeId: formData.employeeId,
+        employeeId: formattedEmpId,
         username: formData.username,
         password: formData.password,
         fullName: formData.fullName,
@@ -138,7 +145,7 @@ export default function UserManagement() {
         role: formData.role as UserRole,
         department: formData.department
       });
-      setSuccess(`User ${formData.username} created successfully!`);
+      setSuccess(`User ${formData.username} created successfully with ID ${formattedEmpId}!`);
       setIsCreateOpen(false);
       setFormData({
         username: "",
@@ -236,20 +243,39 @@ export default function UserManagement() {
     }
   };
 
-  const openCreateModal = () => {
-    // Determine next sequential ID
-    let maxId = 0;
-    users.forEach(u => {
-      if (u.employeeId) {
-        const idNum = parseInt(u.employeeId.replace(/\D/g, ''), 10);
-        if (!isNaN(idNum) && idNum > maxId) {
-          maxId = idNum;
+  const openCreateModal = async () => {
+    try {
+      const res = await api.getNextEmployeeId();
+      setFormData(prev => ({ ...prev, employeeId: res.nextEmployeeId }));
+    } catch (err) {
+      let maxId = 0;
+      users.forEach(u => {
+        if (u.employeeId) {
+          const match = u.employeeId.match(/\d+/);
+          if (match) {
+            const idNum = parseInt(match[0], 10);
+            if (!isNaN(idNum) && idNum > maxId) maxId = idNum;
+          }
         }
-      }
-    });
-    const nextId = String(maxId + 1).padStart(3, '0');
-    setFormData(prev => ({ ...prev, employeeId: nextId }));
+      });
+      setFormData(prev => ({ ...prev, employeeId: `SMEI-EMPLOYEE-${String(maxId + 1).padStart(3, '0')}` }));
+    }
     setIsCreateOpen(true);
+  };
+
+  const handleDeleteUser = async (user: User) => {
+    if (!window.confirm(`Are you sure you want to permanently delete user account "${user.username}" (${user.employeeId || user.id})?\n\nNote: The employee ID "${user.employeeId}" will NOT be reused for future accounts.`)) {
+      return;
+    }
+    setError("");
+    setSuccess("");
+    try {
+      await api.deleteUser(user.id);
+      setSuccess(`Account ${user.username} deleted successfully.`);
+      fetchUsers();
+    } catch (err: any) {
+      setError(err.message || "Failed to delete user account.");
+    }
   };
 
   const openEditModal = (user: User) => {
@@ -411,7 +437,7 @@ export default function UserManagement() {
                     return (
                       <tr key={user.id} className="hover:bg-gray-50/50 transition-all">
                         <td className="p-4 font-mono font-bold text-gray-500">
-                          {user.employeeId || user.id.toUpperCase().replace("U_", "EMP-")}
+                          {user.employeeId || "SMEI-EMPLOYEE-001"}
                         </td>
                         <td className="p-4">
                           <div className="flex items-center gap-3">
@@ -505,12 +531,19 @@ export default function UserManagement() {
                                   onClick={() => toggleUserStatus(user, statusVal)}
                                   className={`p-1.5 rounded-lg transition-all ${
                                     statusVal === "Active"
-                                      ? "text-red-600 hover:bg-red-50"
+                                      ? "text-orange-600 hover:bg-orange-50"
                                       : "text-green-600 hover:bg-green-50"
                                   }`}
                                   title={statusVal === "Active" ? "Disable Account" : "Activate Account"}
                                 >
                                   {statusVal === "Active" ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteUser(user)}
+                                  className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                                  title="Delete Account Permanently"
+                                >
+                                  <Trash2 className="w-4 h-4" />
                                 </button>
                               </>
                             )}

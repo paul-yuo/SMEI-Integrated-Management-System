@@ -55,8 +55,8 @@ export const CONTROL_NUMBER_FORMATS: Record<string, ControlNumberConfig> = {
   },
   rcNumber: {
     key: "rcNumber",
-    label: "RC No.",
-    placeholder: "R-123",
+    label: "Recycle Cert No.",
+    placeholder: "e.g. R-123",
     example: "R-123",
     template: "R-###",
     pattern: /^R-\d{1,6}$/
@@ -283,13 +283,15 @@ export function formatControlNumber(value: string | undefined | null, formatType
     return raw;
   }
 
-  // 7. RC No. formatting: R-###
-  if (configKey === "rcnumber" || configKey === "rcno" || configKey === "r") {
+  // 7. RC No. formatting: R-series (e.g., R-932, R-15402)
+  if (configKey === "rcnumber" || configKey === "rcno" || configKey === "rc" || configKey === "r") {
     if (raw === "N/A") return "N/A";
     if (/^R-\d{1,6}$/.test(raw)) return raw;
 
     const digits = raw.replace(/\D/g, "");
-    if (!digits) return raw.startsWith("R") ? raw : "";
+    if (!digits) {
+      return raw.toUpperCase().startsWith("R") ? "R-" : "";
+    }
 
     return `R-${digits}`;
   }
@@ -376,13 +378,13 @@ export function validateControlNumber(
     return { isValid: true };
   }
 
-  if (configKey === "rcnumber" || configKey === "rcno" || configKey === "r") {
+  if (configKey === "rcnumber" || configKey === "rcno" || configKey === "rc" || configKey === "r") {
     if (cleanVal === "N/A") return { isValid: true };
     const rcRegex = /^R-\d{1,6}$/;
     if (!rcRegex.test(cleanVal)) {
       return {
         isValid: false,
-        error: "RC Number must match the required format: R-123 (e.g., R-123)."
+        error: "Invalid Recycle Cert No. Expected format: R-123 (e.g., R-932, R-15402)."
       };
     }
     return { isValid: true };
@@ -422,5 +424,30 @@ export function validateControlNumber(
   }
 
   return { isValid: true };
+}
+
+/**
+ * Generates the next sequential Control Number (CA No.) based on an offset.
+ * Example: getNextCaNo("03-1233-26", 1) => "03-1234-26"
+ */
+export function getNextCaNo(baseCaNo: string, offset: number): string {
+  if (!baseCaNo || offset === 0) return baseCaNo;
+  const caMatch = baseCaNo.match(/^(0[1-9]|1[0-2])-(\d{4})-(\d{2})$/);
+  if (caMatch) {
+    const mm = caMatch[1];
+    const seq = parseInt(caMatch[2], 10) + offset;
+    const yy = caMatch[3];
+    const seqPadded = String(seq).padStart(4, "0");
+    return `${mm}-${seqPadded}-${yy}`;
+  }
+  const genericMatch = baseCaNo.match(/^(.*?)(\d+)$/);
+  if (genericMatch) {
+    const prefix = genericMatch[1];
+    const digits = genericMatch[2];
+    const newNum = parseInt(digits, 10) + offset;
+    const padded = String(newNum).padStart(digits.length, "0");
+    return `${prefix}${padded}`;
+  }
+  return baseCaNo;
 }
 

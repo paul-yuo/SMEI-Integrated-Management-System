@@ -140,7 +140,7 @@ function cleanCompanyName(rawStr: string): string {
 }
 
 /**
- * Extracts text natively using pdfjs-dist
+ * Extracts text natively using pdfjs-dist with Y/X coordinate sorting and visual line grouping
  */
 async function extractNativePdfText(arrayBuffer: ArrayBuffer): Promise<string> {
   try {
@@ -151,10 +151,37 @@ async function extractNativePdfText(arrayBuffer: ArrayBuffer): Promise<string> {
     for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
       const page = await pdfDoc.getPage(pageNum);
       const textContent = await page.getTextContent();
-      const pageStrings = textContent.items
-        .map((item: any) => item.str)
-        .filter((str: string) => str.trim().length > 0);
-      fullText += pageStrings.join(" ") + "\n";
+      
+      const items = (textContent.items as any[])
+        .filter((item: any) => item && typeof item.str === "string" && item.str.trim().length > 0)
+        .map((item: any) => ({
+          str: item.str,
+          x: item.transform ? item.transform[4] : 0,
+          y: item.transform ? item.transform[5] : 0,
+          width: item.width || 0,
+          height: item.height || 0,
+        }));
+
+      // Group items into lines based on vertical Y coordinate proximity (tolerance = 4 points)
+      const lines: { y: number; items: typeof items }[] = [];
+      for (const item of items) {
+        const existingLine = lines.find((l) => Math.abs(l.y - item.y) < 4);
+        if (existingLine) {
+          existingLine.items.push(item);
+        } else {
+          lines.push({ y: item.y, items: [item] });
+        }
+      }
+
+      // Sort lines top to bottom (Y descending in PDF coordinate system)
+      lines.sort((a, b) => b.y - a.y);
+
+      // Sort items in each line left to right (X ascending)
+      for (const line of lines) {
+        line.items.sort((a, b) => a.x - b.x);
+        const lineText = line.items.map((it) => it.str).join(" ");
+        fullText += lineText + "\n";
+      }
     }
 
     return fullText;
@@ -327,11 +354,13 @@ export function parseManifestText(text: string): {
           if (/kg|kgs|kilograms?/.test(unit) || (/\b(kg|kgs|kilograms?)\b/i.test(fullMatch) && !/mt|metric\s*tonne/i.test(fullMatch))) {
             val = val / 1000;
           } else if (!unit && !/mt|metric\s*tonne|tons?/i.test(fullMatch) && val > 100) {
-            // Unspecified unit with large numeric value (>100) is almost certainly in kilograms
             val = val / 1000;
           }
 
-          if (val < 10000) return val;
+          if (val < 10000) {
+            console.log("[QuantityExtraction] Tier 1 match:", val, "MT from raw:", match[0]);
+            return val;
+          }
         }
       }
     }
@@ -347,7 +376,10 @@ export function parseManifestText(text: string): {
         if (/kg|kgs|kilograms?/.test(unit)) {
           val = val / 1000;
         }
-        if (val < 10000) return val;
+        if (val < 10000) {
+          console.log("[QuantityExtraction] Tier 2 match:", val, "MT from raw:", tier2Match[0]);
+          return val;
+        }
       }
     }
 
@@ -355,14 +387,14 @@ export function parseManifestText(text: string): {
     const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
     for (let i = 0; i < lines.length; i++) {
       if (/(?:Quantity|Qty|Weight|Net\s*Weight|Gross\s*Weight|Volume|Amount)/i.test(lines[i])) {
-        // Check current line and next 3 lines for a number
-        for (let j = i; j <= Math.min(i + 3, lines.length - 1); j++) {
+        // Check current line and next 5 lines for a number
+        for (let j = i; j <= Math.min(i + 5, lines.length - 1); j++) {
           const numMatch = lines[j].match(/\b([\d,]+\.?\d*)\s*(metric\s*tonnes?|MT|Tons?|kgs?|kg|kilograms?)?\b/i);
           if (numMatch && numMatch[1]) {
             const numStr = numMatch[1].replace(/,/g, "");
             let val = parseFloat(numStr);
             // Ensure not matching a date, year, or ID number
-            if (!isNaN(val) && val > 0 && val !== 2024 && val !== 2025 && val !== 2026) {
+            if (!isNaN(val) && val > 0 && val !== 2024 && val !== 2025 && val !== 2026 && val !== 2027) {
               const unit = (numMatch[2] || "").toLowerCase();
               const surroundingText = lines[j].toLowerCase();
               if (/kg|kgs|kilograms?/.test(unit) || /\b(kg|kgs|kilograms?)\b/.test(surroundingText)) {
@@ -370,13 +402,32 @@ export function parseManifestText(text: string): {
               } else if (!unit && val > 100) {
                 val = val / 1000;
               }
-              if (val < 10000) return val;
+              if (val < 10000) {
+                console.log("[QuantityExtraction] Tier 3 match:", val, "MT from line:", lines[j]);
+                return val;
+              }
             }
           }
         }
       }
     }
 
+    // Tier 4: Standalone decimal candidate search (e.g. 0.645, 1.25, 0.1)
+    const decimalMatches = text.matchAll(/\b(\d+\.\d{1,4})\b/g);
+    for (const match of decimalMatches) {
+      const candidateStr = match[1];
+      const val = parseFloat(candidateStr);
+      if (!isNaN(val) && val >= 0.001 && val <= 500) {
+        const index = match.index || 0;
+        const snippet = text.substring(Math.max(0, index - 25), Math.min(text.length, index + 35));
+        if (!/OL-P|OL-GR|M-R4A|\b\d{2}-\d{4}-\d{2}\b/i.test(snippet)) {
+          console.log("[QuantityExtraction] Tier 4 decimal match:", val, "MT from snippet:", snippet);
+          return val;
+        }
+      }
+    }
+
+    console.warn("[QuantityExtraction] No valid quantity found in document text.");
     return null;
   };
 

@@ -10,13 +10,15 @@ import {
   File, 
   Loader2,
   X,
-  Sparkles
+  Sparkles,
+  Layers,
+  Pencil
 } from "lucide-react";
 import { attachCaNoToPdf } from "../utils/pdfStamper";
-import { formatControlNumber, validateControlNumber } from "../utils/controlNumber";
-import { saveDocumentBinary, deleteDocumentBinary } from "../utils/documentStorage";
+import { formatControlNumber, validateControlNumber, getNextCaNo } from "../utils/controlNumber";
+import { saveDocumentBinary, deleteDocumentBinary, getDocumentBinary } from "../utils/documentStorage";
 import { processManifestDocument } from "../utils/manifestParser";
-import { saveManifestRecord, deleteManifestRecordByDocId } from "../utils/manifestStorage";
+import { saveManifestRecord, deleteManifestRecordByDocId, getAllManifestRecords, saveAllManifestRecords } from "../utils/manifestStorage";
 
 interface UploadedDocument {
   id: string;
@@ -49,18 +51,33 @@ export default function ControlNoModule() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // File pending CA No. input modal state
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [showCaNoModal, setShowCaNoModal] = useState(false);
   const [caNoInput, setCaNoInput] = useState("");
   const [validationError, setValidationError] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{
+    current: number;
+    total: number;
+    currentFileName: string;
+    currentCaNo: string;
+  } | null>(null);
 
   // Preview modal state
   const [previewDoc, setPreviewDoc] = useState<UploadedDocument | null>(null);
   const [activeDocData, setActiveDocData] = useState<string>("");
 
+  // Edit Control Number modal state
+  const [editingDoc, setEditingDoc] = useState<UploadedDocument | null>(null);
+  const [editCaNoInput, setEditCaNoInput] = useState("");
+  const [editValidationError, setEditValidationError] = useState("");
+
   // Load uploaded compliance documents from localStorage on mount
   useEffect(() => {
+    loadDocsFromStorage();
+  }, []);
+
+  const loadDocsFromStorage = () => {
     const savedDocs = localStorage.getItem("tsd_uploaded_compliance_docs");
     if (savedDocs) {
       try {
@@ -74,25 +91,52 @@ export default function ControlNoModule() {
         console.error("Failed to parse compliance documents", e);
       }
     }
-  }, []);
+  };
 
   const saveDocsToStorage = (updated: UploadedDocument[]) => {
     setUploadedDocs(updated);
     // Strip inline fileData when saving main metadata list to prevent storage overflow
     const safeDocs = updated.map(({ fileData, ...rest }) => rest);
     localStorage.setItem("tsd_uploaded_compliance_docs", JSON.stringify(safeDocs));
+    window.dispatchEvent(new Event("tsd_data_changed"));
+  };
+
+  /**
+   * Safely append a single document to localStorage reading fresh data to prevent stale closure data loss
+   */
+  const appendDocToStorage = (newDoc: UploadedDocument) => {
+    const existingRaw = localStorage.getItem("tsd_uploaded_compliance_docs");
+    let existingDocs: UploadedDocument[] = [];
+    if (existingRaw) {
+      try {
+        existingDocs = JSON.parse(existingRaw);
+      } catch (e) {
+        console.error("Failed to parse existing compliance docs", e);
+      }
+    }
+    const updated = [newDoc, ...existingDocs.filter(d => d.id !== newDoc.id)];
+    saveDocsToStorage(updated);
   };
 
   // Handle PDF file selection / drop
-  const handleFileSelect = (file: File) => {
-    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
-      alert("Please upload a PDF file.");
+  const handleFilesSelected = (files: File[]) => {
+    console.log(`[FORENSIC STAGE 1] File Selection triggered. Total files received: ${files.length}`);
+    files.forEach((f, idx) => {
+      console.log(`  File ${idx + 1}: name="${f.name}", size=${f.size} bytes, type="${f.type}"`);
+    });
+
+    const pdfFiles = files.filter(f => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"));
+    console.log(`[FORENSIC STAGE 1] Valid PDF files filtered: ${pdfFiles.length} / ${files.length}`);
+
+    if (pdfFiles.length === 0) {
+      alert("Please select valid PDF files.");
       return;
     }
 
-    setPendingFile(file);
+    setPendingFiles(pdfFiles);
     setCaNoInput("");
     setValidationError("");
+    setBatchProgress(null);
     setShowCaNoModal(true);
   };
 
@@ -110,16 +154,16 @@ export default function ControlNoModule() {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFileSelect(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFilesSelected(Array.from(e.dataTransfer.files));
     }
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      handleFileSelect(e.target.files[0]);
+    if (e.target.files && e.target.files.length > 0) {
+      handleFilesSelected(Array.from(e.target.files));
     }
-    // Reset file input value so the same file can be re-selected if cancelled
+    // Reset file input value so the same files can be re-selected if cancelled
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -138,168 +182,156 @@ export default function ControlNoModule() {
     }
   };
 
-  // Save record only (without downloading PDF)
-  const handleSaveOnly = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!pendingFile) return;
+  /**
+   * Process pending PDF batch (Save or Download+Save)
+   */
+  const handleBatchProcess = async (downloadPdf: boolean = false) => {
+    if (!pendingFiles || pendingFiles.length === 0) return;
 
     if (!isValidCaNo(caNoInput)) {
-      setValidationError("Please enter a valid CA No. using the format MM-####-YY.");
+      setValidationError("Please enter a valid starting CA No. using the format MM-####-YY.");
       return;
     }
 
     setValidationError("");
     setIsProcessing(true);
 
-    try {
-      const arrayBuffer = await pendingFile.arrayBuffer();
-      const docId = `doc-${Date.now()}`;
+    const totalFiles = pendingFiles.length;
+    let successCount = 0;
+    let failCount = 0;
+    const errorDetails: string[] = [];
 
-      // 1. Store PDF binary in IndexedDB
-      await saveDocumentBinary(docId, pendingFile.name, pendingFile.type, arrayBuffer);
+    console.log(`[FORENSIC STAGE 2] Starting batch processing for ${totalFiles} file(s) with starting CA No. ${caNoInput}`);
 
-      // 2. Run Zero-Cost Extraction Pipeline
-      const extraction = await processManifestDocument(arrayBuffer, caNoInput);
+    for (let i = 0; i < totalFiles; i++) {
+      const file = pendingFiles[i];
+      const currentCaNo = getNextCaNo(caNoInput, i);
 
-      // 3. Save Manifest Record to Manifest Ledger
-      saveManifestRecord({
-        id: `manifest-${docId}`,
-        controlNo: caNoInput, // Authoritative CA No.
-        companyName: extraction.companyName || "",
-        tpNumber: extraction.tpNumber || "",
-        manifestNo: extraction.manifestNo || "",
-        deliveryDate: extraction.deliveryDate || new Date().toISOString().split("T")[0],
-        quantity: extraction.quantity || 0,
-        extractionMethod: extraction.extractionMethod,
-        confidence: extraction.confidence,
-        warnings: extraction.warnings,
-        docId: docId,
-        createdAt: new Date().toISOString(),
+      setBatchProgress({
+        current: i + 1,
+        total: totalFiles,
+        currentFileName: file.name,
+        currentCaNo,
       });
 
-      // 4. Save metadata in Control No. list
-      const sizeStr = pendingFile.size > 1024 * 1024 
-        ? (pendingFile.size / (1024 * 1024)).toFixed(1) + " MB" 
-        : (pendingFile.size / 1024).toFixed(0) + " KB";
+      try {
+        console.log(`[FORENSIC STAGE 3] File ${i + 1}/${totalFiles} (${file.name}): Extraction started with CA No ${currentCaNo}`);
 
-      const newDocName = `${caNoInput}_${pendingFile.name}`;
-      const newDoc: UploadedDocument = {
-        id: docId,
-        fileName: newDocName,
-        fileSize: sizeStr,
-        fileType: "PDF",
-        uploadedAt: new Date().toLocaleDateString() + " " + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        caNumber: caNoInput,
-      };
+        let arrayBuffer: ArrayBuffer;
+        const downloadFileName = `${currentCaNo}_${file.name}`;
 
-      const updated = [newDoc, ...uploadedDocs];
-      saveDocsToStorage(updated);
+        if (downloadPdf) {
+          const { blob } = await attachCaNoToPdf(file, currentCaNo);
+          arrayBuffer = await blob.arrayBuffer();
 
-      // Reset modal state
-      setShowCaNoModal(false);
-      setPendingFile(null);
-      setCaNoInput("");
+          // Trigger download
+          const downloadLink = document.createElement("a");
+          downloadLink.href = URL.createObjectURL(blob);
+          downloadLink.download = downloadFileName;
+          document.body.appendChild(downloadLink);
+          downloadLink.click();
+          document.body.removeChild(downloadLink);
+        } else {
+          arrayBuffer = await file.arrayBuffer();
+        }
 
-      if (extraction.warnings.length > 0) {
-        alert(`Document attached with CA No. ${caNoInput}.\nNote: ${extraction.warnings.join(" ")}`);
+        const docId = `doc-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 7)}`;
+
+        // 1. Save binary in IndexedDB
+        await saveDocumentBinary(docId, downloadFileName, "application/pdf", arrayBuffer);
+
+        // 2. Extract data from PDF
+        const extraction = await processManifestDocument(arrayBuffer, currentCaNo);
+
+        console.log(`[FORENSIC STAGE 4] Extracted Record for File ${i + 1} (${file.name}):`, {
+          fileName: file.name,
+          companyName: extraction.companyName,
+          controlNo: currentCaNo,
+          tpNumber: extraction.tpNumber,
+          manifestNo: extraction.manifestNo,
+          deliveryDate: extraction.deliveryDate,
+          quantity: extraction.quantity,
+          extractionMethod: extraction.extractionMethod,
+        });
+
+        // 3. Save Manifest Record
+        const validQty =
+          extraction.quantity !== null &&
+          extraction.quantity !== undefined &&
+          !isNaN(Number(extraction.quantity)) &&
+          Number(extraction.quantity) >= 0
+            ? Number(extraction.quantity)
+            : 0;
+
+        const newRecord = {
+          id: `manifest-${docId}`,
+          controlNo: currentCaNo, // Authoritative CA No.
+          companyName: extraction.companyName || "",
+          tpNumber: extraction.tpNumber || "",
+          manifestNo: extraction.manifestNo || "",
+          deliveryDate: extraction.deliveryDate || new Date().toISOString().split("T")[0],
+          quantity: validQty,
+          extractionMethod: extraction.extractionMethod,
+          confidence: extraction.confidence,
+          warnings: extraction.warnings,
+          docId: docId,
+          createdAt: new Date().toISOString(),
+        };
+
+        console.log(`[FORENSIC STAGE 5] Creating ManifestRecord object: id=${newRecord.id}, docId=${docId}, deliveryDate=${newRecord.deliveryDate}`);
+
+        saveManifestRecord(newRecord);
+
+        // 4. Save metadata in Control No. list
+        const sizeStr = file.size > 1024 * 1024 
+          ? (file.size / (1024 * 1024)).toFixed(1) + " MB" 
+          : (file.size / 1024).toFixed(0) + " KB";
+
+        const newDoc: UploadedDocument = {
+          id: docId,
+          fileName: downloadFileName,
+          fileSize: sizeStr,
+          fileType: "PDF",
+          uploadedAt: new Date().toLocaleDateString() + " " + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          caNumber: currentCaNo,
+        };
+
+        appendDocToStorage(newDoc);
+        successCount++;
+        console.log(`[FORENSIC STAGE 5 Success] File ${i + 1}/${totalFiles}: ${file.name} -> docId=${docId}`);
+
+      } catch (err: any) {
+        failCount++;
+        const errMsg = err?.message || "Extraction or saving error";
+        errorDetails.push(`${file.name}: ${errMsg}`);
+        console.error(`[FORENSIC STAGE 3/5 Failure] File ${i + 1}/${totalFiles} Failed (${file.name}):`, err);
       }
-    } catch (err) {
-      console.error("Failed to save document:", err);
-      alert("An error occurred while saving the document record. Please try again.");
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  // Stamp CA No. on PDF, trigger download, and save record
-  const handleDownloadPdf = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-
-    if (!pendingFile) return;
-
-    if (!isValidCaNo(caNoInput)) {
-      setValidationError("Please enter a valid CA No. using the format MM-####-YY.");
-      return;
     }
 
-    setValidationError("");
-    setIsProcessing(true);
+    setIsProcessing(false);
+    setShowCaNoModal(false);
+    setPendingFiles([]);
+    setCaNoInput("");
+    setBatchProgress(null);
 
-    try {
-      // Attach CA No. to uploaded PDF using Times New Roman Bold 14pt
-      const { blob } = await attachCaNoToPdf(pendingFile, caNoInput);
-      const arrayBuffer = await blob.arrayBuffer();
-      const docId = `doc-${Date.now()}`;
+    console.log(`[FORENSIC STAGE 7 Storage Verification] Batch Finish: ${successCount} succeeded, ${failCount} failed out of ${totalFiles} total.`);
+    const postBatchDocsRaw = localStorage.getItem("tsd_uploaded_compliance_docs");
+    const postBatchDocs = postBatchDocsRaw ? JSON.parse(postBatchDocsRaw) : [];
+    console.log(`[FORENSIC STAGE 7 Storage Verification] Post-Batch total compliance docs in storage = ${postBatchDocs.length}`);
 
-      // Trigger automatic download of modified PDF
-      const downloadFileName = `${caNoInput}_${pendingFile.name}`;
-      const downloadLink = document.createElement("a");
-      downloadLink.href = URL.createObjectURL(blob);
-      downloadLink.download = downloadFileName;
-      document.body.appendChild(downloadLink);
-      downloadLink.click();
-      document.body.removeChild(downloadLink);
-
-      // 1. Save binary into IndexedDB
-      await saveDocumentBinary(docId, downloadFileName, "application/pdf", arrayBuffer);
-
-      // 2. Run Zero-Cost Extraction Pipeline
-      const extraction = await processManifestDocument(arrayBuffer, caNoInput);
-
-      // 3. Save Manifest Record to Manifest Ledger
-      saveManifestRecord({
-        id: `manifest-${docId}`,
-        controlNo: caNoInput, // Authoritative CA No.
-        companyName: extraction.companyName || "",
-        tpNumber: extraction.tpNumber || "",
-        manifestNo: extraction.manifestNo || "",
-        deliveryDate: extraction.deliveryDate || new Date().toISOString().split("T")[0],
-        quantity: extraction.quantity || 0,
-        extractionMethod: extraction.extractionMethod,
-        confidence: extraction.confidence,
-        warnings: extraction.warnings,
-        docId: docId,
-        createdAt: new Date().toISOString(),
-      });
-
-      // 4. Save metadata in Control No list
-      const sizeStr = pendingFile.size > 1024 * 1024 
-        ? (pendingFile.size / (1024 * 1024)).toFixed(1) + " MB" 
-        : (pendingFile.size / 1024).toFixed(0) + " KB";
-
-      const newDoc: UploadedDocument = {
-        id: docId,
-        fileName: downloadFileName,
-        fileSize: sizeStr,
-        fileType: "PDF",
-        uploadedAt: new Date().toLocaleDateString() + " " + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        caNumber: caNoInput,
-      };
-
-      const updated = [newDoc, ...uploadedDocs];
-      saveDocsToStorage(updated);
-
-      // Reset modal state
-      setShowCaNoModal(false);
-      setPendingFile(null);
-      setCaNoInput("");
-
-      if (extraction.warnings.length > 0) {
-        alert(`Document stamped with CA No. ${caNoInput}.\nNote: ${extraction.warnings.join(" ")}`);
-      }
-    } catch (err) {
-      console.error("Failed to attach CA No. to PDF:", err);
-      alert("An error occurred while attaching CA No. to the PDF. Please try again.");
-    } finally {
-      setIsProcessing(false);
+    if (failCount > 0) {
+      alert(`Batch upload complete.\n\nSuccessfully processed: ${successCount}/${totalFiles}\nFailed: ${failCount}\n\nFailures:\n${errorDetails.join("\n")}`);
+    } else if (totalFiles > 1) {
+      alert(`Successfully processed all ${totalFiles} compliance documents!`);
     }
   };
 
   const handleCancelModal = () => {
     setShowCaNoModal(false);
-    setPendingFile(null);
+    setPendingFiles([]);
     setCaNoInput("");
     setValidationError("");
+    setBatchProgress(null);
   };
 
   const handleDeleteDoc = async (id: string) => {
@@ -312,28 +344,148 @@ export default function ControlNoModule() {
     }
   };
 
-  const handleDownloadDoc = (doc: UploadedDocument) => {
-    const dataUrl = doc.fileData || localStorage.getItem(`tsd_doc_data_${doc.id}`);
-    if (!dataUrl) {
-      alert("Source PDF file data not available.");
-      return;
+  const handleDownloadDoc = async (doc: UploadedDocument) => {
+    try {
+      let dataUrl = doc.fileData || localStorage.getItem(`tsd_doc_data_${doc.id}`);
+      let blobUrl = "";
+
+      if (!dataUrl) {
+        const arrayBuffer = await getDocumentBinary(doc.id);
+        if (arrayBuffer) {
+          const blob = new Blob([arrayBuffer], { type: "application/pdf" });
+          blobUrl = URL.createObjectURL(blob);
+        }
+      }
+
+      const finalUrl = blobUrl || dataUrl;
+
+      if (!finalUrl) {
+        alert("Source PDF file data not available.");
+        return;
+      }
+
+      const link = document.createElement("a");
+      link.href = finalUrl;
+      link.download = doc.fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      if (blobUrl) {
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+      }
+    } catch (err) {
+      console.error("Failed to download document:", err);
+      alert("Unable to download document.");
     }
-    const link = document.createElement("a");
-    link.href = dataUrl;
-    link.download = doc.fileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
   };
 
-  const handlePreviewDoc = (doc: UploadedDocument) => {
-    const dataUrl = doc.fileData || localStorage.getItem(`tsd_doc_data_${doc.id}`) || "";
-    if (!dataUrl) {
-      alert("Source PDF file data not available for preview.");
+  const handlePreviewDoc = async (doc: UploadedDocument) => {
+    try {
+      let dataUrl = doc.fileData || localStorage.getItem(`tsd_doc_data_${doc.id}`) || "";
+      if (!dataUrl) {
+        const arrayBuffer = await getDocumentBinary(doc.id);
+        if (arrayBuffer) {
+          const blob = new Blob([arrayBuffer], { type: "application/pdf" });
+          dataUrl = URL.createObjectURL(blob);
+        }
+      }
+
+      if (!dataUrl) {
+        alert("Source PDF file data not available for preview.");
+        return;
+      }
+
+      setPreviewDoc(doc);
+      setActiveDocData(dataUrl);
+    } catch (err) {
+      console.error("Failed to preview document:", err);
+      alert("Unable to preview document.");
+    }
+  };
+
+  const handleOpenEditModal = (doc: UploadedDocument) => {
+    setEditingDoc(doc);
+    setEditCaNoInput(doc.caNumber);
+    setEditValidationError("");
+  };
+
+  const handleEditCaNoInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawVal = e.target.value;
+    const formatted = formatCaNoInput(rawVal);
+    setEditCaNoInput(formatted);
+
+    if (editValidationError) {
+      if (isValidCaNo(formatted)) {
+        setEditValidationError("");
+      }
+    }
+  };
+
+  const handleSaveEditCaNo = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingDoc) return;
+
+    const trimmedInput = editCaNoInput.trim();
+
+    if (!trimmedInput) {
+      setEditValidationError("Control Number cannot be empty.");
       return;
     }
-    setPreviewDoc(doc);
-    setActiveDocData(dataUrl);
+
+    if (!isValidCaNo(trimmedInput)) {
+      setEditValidationError("Please enter a valid CA No. using the format MM-####-YY.");
+      return;
+    }
+
+    // Prevent duplicates across other compliance documents
+    const isDuplicate = uploadedDocs.some(
+      (d) => d.id !== editingDoc.id && d.caNumber.toLowerCase() === trimmedInput.toLowerCase()
+    );
+
+    if (isDuplicate) {
+      setEditValidationError(`Control Number "${trimmedInput}" is already assigned to another document.`);
+      return;
+    }
+
+    const oldCaNumber = editingDoc.caNumber;
+
+    // 1. Update uploaded compliance documents metadata
+    const updatedDocs = uploadedDocs.map((doc) => {
+      if (doc.id === editingDoc.id) {
+        return { ...doc, caNumber: trimmedInput };
+      }
+      return doc;
+    });
+
+    saveDocsToStorage(updatedDocs);
+
+    // 2. Update associated manifest records in localStorage
+    try {
+      const allManifests = getAllManifestRecords();
+      let recordsUpdatedCount = 0;
+
+      const updatedManifests = allManifests.map((rec) => {
+        if (rec.docId === editingDoc.id || rec.controlNo === oldCaNumber || rec.id === `manifest-${editingDoc.id}`) {
+          recordsUpdatedCount++;
+          return {
+            ...rec,
+            controlNo: trimmedInput,
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        return rec;
+      });
+
+      if (recordsUpdatedCount > 0) {
+        saveAllManifestRecords(updatedManifests);
+      }
+    } catch (err) {
+      console.error("Failed to update associated manifest records:", err);
+    }
+
+    setEditingDoc(null);
+    alert("Control Number updated successfully.");
   };
 
   const filteredDocs = uploadedDocs.filter(d => {
@@ -350,7 +502,7 @@ export default function ControlNoModule() {
             Control No. Manager
           </h2>
           <p className="text-xs md:text-sm text-gray-500 dark:text-slate-400 mt-0.5">
-            Upload PDF compliance documents to attach CA Numbers seamlessly to the top-right corner.
+            Upload PDF compliance documents to attach CA Numbers seamlessly and extract manifest records automatically.
           </p>
         </div>
       </div>
@@ -359,7 +511,7 @@ export default function ControlNoModule() {
         {/* Upload PDF Card */}
         <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-gray-200 dark:border-slate-800 shadow-sm space-y-4">
           <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 font-display uppercase tracking-wider border-b border-slate-100 dark:border-slate-800 pb-3">
-            Upload PDF
+            Upload PDF Documents (Supports Batch Uploads)
           </h3>
 
           <div
@@ -380,6 +532,7 @@ export default function ControlNoModule() {
               className="hidden"
               onChange={handleFileInputChange}
               accept=".pdf"
+              multiple
             />
             <div className="flex flex-col items-center gap-3">
               <div className="w-12 h-12 rounded-full bg-red-50 dark:bg-red-950/20 flex items-center justify-center border border-red-100 dark:border-red-900/30">
@@ -387,10 +540,10 @@ export default function ControlNoModule() {
               </div>
               <div>
                 <p className="text-sm font-bold text-slate-700 dark:text-slate-300">
-                  Drag PDF here or browse
+                  Drag PDF file(s) here or browse
                 </p>
                 <p className="text-[11px] text-gray-400 dark:text-slate-500 mt-1 font-mono">
-                  Supports PDF files only
+                  Supports single or multiple PDF documents at once
                 </p>
               </div>
             </div>
@@ -436,7 +589,9 @@ export default function ControlNoModule() {
                   filteredDocs.map((doc) => (
                     <tr 
                       key={doc.id}
-                      className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition-colors"
+                      onDoubleClick={() => handlePreviewDoc(doc)}
+                      className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition-colors cursor-pointer select-none"
+                      title="Double-click row to preview document"
                     >
                       <td className="py-3.5 px-4 whitespace-nowrap">
                         <span className="font-bold text-xs px-2.5 py-1 rounded bg-red-50 text-smei-crimson border border-red-100 dark:bg-red-950/20 dark:text-rose-400 dark:border-red-900/30 font-mono">
@@ -466,14 +621,30 @@ export default function ControlNoModule() {
                       <td className="py-3.5 px-4 text-right whitespace-nowrap">
                         <div className="flex justify-end gap-1.5">
                           <button
-                            onClick={() => handleDownloadDoc(doc)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenEditModal(doc);
+                            }}
+                            className="p-1.5 text-gray-500 hover:text-smei-crimson border border-gray-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 transition-all cursor-pointer hover:scale-105 active:scale-95"
+                            title="Edit Control Number"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDownloadDoc(doc);
+                            }}
                             className="p-1.5 text-gray-500 hover:text-smei-crimson border border-gray-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 transition-all cursor-pointer hover:scale-105 active:scale-95"
                             title="Download Modified PDF"
                           >
                             <Download className="w-3.5 h-3.5" />
                           </button>
                           <button
-                            onClick={() => handleDeleteDoc(doc.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteDoc(doc.id);
+                            }}
                             className="p-1.5 text-gray-400 hover:text-red-600 border border-gray-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 transition-all cursor-pointer hover:scale-105 active:scale-95"
                             title="Delete Document"
                           >
@@ -486,7 +657,7 @@ export default function ControlNoModule() {
                 ) : (
                   <tr>
                     <td colSpan={4} className="text-center py-8 text-gray-400 dark:text-slate-500 font-sans">
-                      No compliance documents available. Upload a PDF file to attach a CA No.
+                      No compliance documents available. Upload PDF files to attach CA Numbers and generate manifest records.
                     </td>
                   </tr>
                 )}
@@ -499,12 +670,15 @@ export default function ControlNoModule() {
       {/* ---------------- ENTER CA NO. POPUP MODAL ---------------- */}
       {showCaNoModal && (
         <div id="enter-cano-modal" className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-sm w-full mx-4 overflow-hidden">
+          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full mx-4 overflow-hidden">
             {/* Modal Header */}
             <div className="bg-slate-50 dark:bg-slate-950 p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-              <h3 className="text-xs font-bold text-slate-800 dark:text-slate-100 uppercase tracking-wider font-mono">
-                ENTER CA NO.
-              </h3>
+              <div className="flex items-center gap-2">
+                <Layers className="w-4 h-4 text-smei-crimson" />
+                <h3 className="text-xs font-bold text-slate-800 dark:text-slate-100 uppercase tracking-wider font-mono">
+                  {pendingFiles.length > 1 ? `BATCH UPLOAD (${pendingFiles.length} FILES)` : "ENTER CA NO."}
+                </h3>
+              </div>
               <button
                 onClick={handleCancelModal}
                 disabled={isProcessing}
@@ -515,29 +689,68 @@ export default function ControlNoModule() {
             </div>
 
             {/* Modal Form */}
-            <form onSubmit={handleDownloadPdf} className="p-5 space-y-4">
-              {pendingFile && (
-                <div className="flex items-center gap-2 p-2.5 bg-slate-50 dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800">
-                  <FileText className="w-5 h-5 text-red-500 shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-bold text-slate-700 dark:text-slate-300 truncate font-sans">
-                      {pendingFile.name}
-                    </p>
-                    <p className="text-[10px] text-gray-400 font-mono">
-                      {(pendingFile.size / 1024).toFixed(0)} KB • PDF
-                    </p>
+            <div className="p-5 space-y-4">
+              {/* Selected Files Preview List */}
+              {pendingFiles.length > 0 && (
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-mono font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wider block">
+                    Selected Documents ({pendingFiles.length})
+                  </label>
+                  <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1 divide-y divide-slate-100 dark:divide-slate-800/50">
+                    {pendingFiles.map((file, idx) => (
+                      <div key={idx} className="flex items-center gap-2 p-2 bg-slate-50 dark:bg-slate-950 rounded-lg border border-slate-100 dark:border-slate-800/80">
+                        <FileText className="w-4 h-4 text-red-500 shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-bold text-slate-700 dark:text-slate-300 truncate font-sans">
+                            {file.name}
+                          </p>
+                          <p className="text-[10px] text-gray-400 font-mono">
+                            {(file.size / 1024).toFixed(0)} KB • PDF
+                            {caNoInput && isValidCaNo(caNoInput) && (
+                              <span className="ml-2 font-bold text-smei-crimson dark:text-rose-400">
+                                → CA No. {getNextCaNo(caNoInput, idx)}
+                              </span>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
 
+              {/* Progress Indicator */}
+              {isProcessing && batchProgress && (
+                <div className="p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/40 rounded-lg space-y-2">
+                  <div className="flex items-center justify-between text-xs font-mono font-bold text-smei-crimson dark:text-rose-400">
+                    <span className="flex items-center gap-1.5">
+                      <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                      Processing {batchProgress.current} of {batchProgress.total}
+                    </span>
+                    <span>{Math.round((batchProgress.current / batchProgress.total) * 100)}%</span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-300 truncate font-sans">
+                    {batchProgress.currentFileName}
+                  </p>
+                  <div className="w-full bg-red-200 dark:bg-red-900/50 h-1.5 rounded-full overflow-hidden">
+                    <div 
+                      className="bg-smei-crimson h-full transition-all duration-300"
+                      style={{ width: `${(batchProgress.current / batchProgress.total) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* CA No. Input */}
               <div className="space-y-1.5">
                 <label className="text-[10px] font-mono font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wider block">
-                  CA No. *
+                  {pendingFiles.length > 1 ? "Starting CA No. *" : "CA No. *"}
                 </label>
                 <input
                   type="text"
                   required
                   autoFocus
+                  disabled={isProcessing}
                   value={caNoInput}
                   onChange={handleCaNoInputChange}
                   placeholder="06-1234-26"
@@ -557,12 +770,17 @@ export default function ControlNoModule() {
                 ) : (
                   <p className="text-[10px] text-gray-400 dark:text-slate-500 font-sans mt-1">
                     Format: <span className="font-mono font-bold text-gray-600 dark:text-slate-300">MM-####-YY</span> (e.g. 06-1234-26)
+                    {pendingFiles.length > 1 && (
+                      <span className="block text-slate-600 dark:text-slate-400 font-medium mt-0.5">
+                        Sequential CA Numbers will be auto-assigned across all {pendingFiles.length} documents.
+                      </span>
+                    )}
                   </p>
                 )}
               </div>
 
               {/* Actions */}
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <div className="flex flex-wrap items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
                 <button
                   type="button"
                   onClick={handleCancelModal}
@@ -573,30 +791,119 @@ export default function ControlNoModule() {
                 </button>
                 <button
                   type="button"
-                  onClick={handleSaveOnly}
+                  onClick={() => handleBatchProcess(false)}
                   disabled={isProcessing}
                   className="border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 px-4 py-2 rounded-lg text-xs font-bold font-mono uppercase tracking-wider flex items-center gap-1.5 shadow-xs transition-all cursor-pointer hover:scale-[1.01] active:scale-95 disabled:opacity-50"
                 >
                   <CheckCircle className="w-3.5 h-3.5 text-slate-500" />
-                  <span>SAVE</span>
+                  <span>{pendingFiles.length > 1 ? `SAVE ALL (${pendingFiles.length})` : "SAVE"}</span>
                 </button>
                 <button
                   type="button"
-                  onClick={handleDownloadPdf}
+                  onClick={() => handleBatchProcess(true)}
                   disabled={isProcessing}
                   className="bg-smei-crimson hover:bg-smei-darkred text-white px-5 py-2 rounded-lg text-xs font-bold font-mono uppercase tracking-wider flex items-center gap-1.5 shadow-sm transition-all cursor-pointer hover:scale-[1.02] active:scale-95 disabled:opacity-50"
                 >
                   {isProcessing ? (
                     <>
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>DOWNLOADING...</span>
+                      <span>PROCESSING...</span>
                     </>
                   ) : (
                     <>
                       <CheckCircle className="w-3.5 h-3.5" />
-                      <span>DOWNLOAD PDF</span>
+                      <span>{pendingFiles.length > 1 ? `DOWNLOAD & SAVE ALL (${pendingFiles.length})` : "DOWNLOAD PDF"}</span>
                     </>
                   )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------- EDIT CONTROL NUMBER POPUP MODAL ---------------- */}
+      {editingDoc && (
+        <div id="edit-controlno-modal" className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+            {/* Modal Header */}
+            <div className="bg-slate-50 dark:bg-slate-950 p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Pencil className="w-4 h-4 text-smei-crimson" />
+                <h3 className="text-xs font-bold text-slate-800 dark:text-slate-100 uppercase tracking-wider font-mono">
+                  Edit Control Number
+                </h3>
+              </div>
+              <button
+                onClick={() => setEditingDoc(null)}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-slate-300 p-1 rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Form */}
+            <form onSubmit={handleSaveEditCaNo} className="p-5 space-y-4">
+              {/* Document Info Summary */}
+              <div className="flex items-center gap-2 p-2.5 bg-slate-50 dark:bg-slate-950 rounded-lg border border-slate-100 dark:border-slate-800">
+                <FileText className="w-4 h-4 text-red-500 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold text-slate-700 dark:text-slate-300 truncate font-sans">
+                    {editingDoc.fileName}
+                  </p>
+                  <p className="text-[10px] text-gray-400 font-mono">
+                    Current CA No: <span className="font-bold text-smei-crimson">{editingDoc.caNumber}</span>
+                  </p>
+                </div>
+              </div>
+
+              {/* CA No. Input */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-mono font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wider block">
+                  CA Number *
+                </label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  value={editCaNoInput}
+                  onChange={handleEditCaNoInputChange}
+                  placeholder="06-1234-26"
+                  maxLength={10}
+                  className={`w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border rounded-lg text-sm font-mono focus:outline-none focus:ring-1 focus:ring-smei-crimson text-slate-800 dark:text-slate-200 font-bold ${
+                    editValidationError 
+                      ? "border-red-400 dark:border-red-500 focus:ring-red-500" 
+                      : "border-slate-200 dark:border-slate-800"
+                  }`}
+                />
+
+                {editValidationError ? (
+                  <p className="text-[10px] text-red-600 dark:text-rose-400 font-semibold flex items-center gap-1 mt-1">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>{editValidationError}</span>
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-gray-400 dark:text-slate-500 font-sans mt-1">
+                    Format: <span className="font-mono font-bold text-gray-600 dark:text-slate-300">MM-####-YY</span> (e.g. 06-1234-26)
+                  </p>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setEditingDoc(null)}
+                  className="px-3.5 py-2 text-xs font-bold text-gray-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-all font-mono uppercase tracking-wider cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="bg-smei-crimson hover:bg-smei-darkred text-white px-5 py-2 rounded-lg text-xs font-bold font-mono uppercase tracking-wider flex items-center gap-1.5 shadow-sm transition-all cursor-pointer hover:scale-[1.02] active:scale-95"
+                >
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  <span>Save Changes</span>
                 </button>
               </div>
             </form>

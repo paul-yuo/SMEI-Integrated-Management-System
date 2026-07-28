@@ -8,7 +8,7 @@ import { RequestForSupply, RFSItem, User, UserRole } from "../types";
 import { api } from "../lib/api";
 import { Search, Plus, Filter, Calendar, FileText, ArrowUpDown, Trash2, Edit3, Eye, FileSpreadsheet, X, Download, Trash } from "lucide-react";
 import { exportWordWithTemplate, exportExcelWithTemplate } from "../utils/templateExport";
-import { ExportExcelButton, CreateButton, ExportPdfButton } from "./SharedButtons";
+import { ExportExcelButton, CreateButton } from "./SharedButtons";
 import { TableSkeleton } from "./ui/Skeleton";
 import { formatRFSNo } from "../utils/templateMapping";
 import { formatControlNumber } from "../utils/controlNumber";
@@ -44,6 +44,8 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
   const [departmentOthers, setDepartmentOthers] = useState("");
   const [controlNumber, setControlNumber] = useState("");
   const [purchaseOrderNumber, setPurchaseOrderNumber] = useState("");
+  const [availablePOs, setAvailablePOs] = useState<any[]>([]);
+  const [addNothingFollows, setAddNothingFollows] = useState<boolean>(false);
   const [status, setStatus] = useState<"Complete" | "Incomplete" | "On Time" | "Late">("Incomplete");
   const [modeOfRequest, setModeOfRequest] = useState<"Emergency" | "Urgent" | "Regular" | "Irregular">("Regular");
   const [purpose, setPurpose] = useState("");
@@ -84,6 +86,7 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
 
   useEffect(() => {
     fetchRequests();
+    api.getPOs().then((pos) => setAvailablePOs(pos || [])).catch((err) => console.error("Error fetching POs for dropdown:", err));
   }, []);
 
   // Filter & Search Logic
@@ -135,6 +138,7 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
       departmentOthers: department === "Others" ? departmentOthers : "",
       controlNumber,
       purchaseOrderNumber,
+      addNothingFollows,
       items,
       status,
       modeOfRequest,
@@ -148,7 +152,7 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
     };
   }, [
     selectedRequest, rfsNumber, dateRequested, dueDate, department, departmentOthers,
-    controlNumber, purchaseOrderNumber, items, status, modeOfRequest, purpose,
+    controlNumber, purchaseOrderNumber, addNothingFollows, items, status, modeOfRequest, purpose,
     requestedBy, verifiedBy, approvedBy, currentUser
   ]);
 
@@ -164,7 +168,8 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
       setDepartment(req.department);
       setDepartmentOthers(req.departmentOthers || "");
       setControlNumber(req.controlNumber);
-      setPurchaseOrderNumber((req.purchaseOrderNumber || "").toUpperCase());
+      setPurchaseOrderNumber(req.purchaseOrderNumber || "");
+      setAddNothingFollows(req.addNothingFollows ?? false);
       setStatus(req.status);
       setModeOfRequest(req.modeOfRequest);
       setPurpose(req.purpose);
@@ -179,6 +184,7 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
       setDueDate("");
       setDepartment("Admin");
       setDepartmentOthers("");
+      setAddNothingFollows(false);
       
       // Auto-generate sequential 5-digit control number
       let nextControlNo = "00001";
@@ -332,6 +338,7 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
       departmentOthers: department === "Others" ? departmentOthers : "",
       controlNumber: "",
       purchaseOrderNumber,
+      addNothingFollows,
       items,
       status,
       modeOfRequest,
@@ -368,7 +375,8 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
   };
 
   const validateRFSExport = (req: RequestForSupply): boolean => {
-    const isComplete = req.status === "Complete";
+    const isApproved = req.approvalStatus === "Approved";
+    const isComplete = req.status === "Complete" || req.status === "On Time" || req.status === "Late" || isApproved;
     const hasDueDate = Boolean(req.dueDate && req.dueDate.trim() !== "");
 
     if (!isComplete && !hasDueDate) {
@@ -380,7 +388,7 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
       return false;
     }
     if (!hasDueDate) {
-      alert("Cannot export RFS. Due Date is missing. Please set the Due Date in RFS Approval before exporting.");
+      alert("Cannot export RFS. Due Date is missing. Please set the Due Date in Procurement Approval before exporting.");
       return false;
     }
     return true;
@@ -406,7 +414,12 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
       APPROVED_BY: req.approvedBy || "N/A",
     };
 
-    const exportItems = (req.items || []).map((it, index) => ({
+    const reqToExport = {
+      ...req,
+      addNothingFollows: req.addNothingFollows ?? addNothingFollows
+    };
+
+    const exportItems = (reqToExport.items || []).map((it, index) => ({
       index: index + 1,
       quantity: it.quantity,
       unit: it.unit,
@@ -419,6 +432,22 @@ export default function RequestForSupplyModule({ currentUser }: RFSModuleProps) 
       currentPurchaseUnitPrice: it.currentPurchaseUnitPrice || 0,
       remarks: it.remarks || "N/A",
     }));
+
+    if (reqToExport.addNothingFollows) {
+      exportItems.push({
+        index: exportItems.length + 1,
+        quantity: "" as any,
+        unit: "",
+        description: "*****NOTHING FOLLOWS*****",
+        lastPurchaseDate: "N/A",
+        lastPurchaseQuantity: 0,
+        lastPurchaseUnitPrice: 0,
+        currentPurchaseDate: "N/A",
+        currentPurchaseQuantity: 0,
+        currentPurchaseUnitPrice: 0,
+        remarks: "N/A",
+      });
+    }
 
     if (format === "word") {
       // Pass data to Docxtemplater containing loop array "items"
@@ -449,20 +478,6 @@ const handleExportExcel = async () => {
     }
     await handleExport(selectedRFS, "excel");
 };
-
-  const handleTriggerPDFExport = async () => {
-    if (selectedRFS) {
-      if (!validateRFSExport(selectedRFS)) return;
-      try {
-        const { printDocument } = await import("../utils/printDocument");
-        await printDocument("rfs", selectedRFS);
-      } catch (err: any) {
-        alert("Failed to print: " + (err.message || err));
-      }
-    } else {
-      alert("Please select an RFS first.");
-    }
-  };
 
   return (
     <div id="smei-rfs-list" className="p-4 md:p-6 space-y-4 max-w-[130rem] mx-auto w-full">
@@ -544,10 +559,10 @@ const handleExportExcel = async () => {
                       <input
                         type="text"
                         disabled={!isEditMode}
-                        placeholder="e.g. PO-26-005"
-                        className="w-full text-sm p-2 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson font-mono"
+                        className="w-full text-sm font-mono p-2 border border-gray-200 rounded-lg focus:ring-1 focus:ring-smei-crimson focus:border-smei-crimson outline-none bg-white"
                         value={purchaseOrderNumber}
-                        onChange={(e) => setPurchaseOrderNumber(e.target.value.toUpperCase())}
+                        onChange={(e) => setPurchaseOrderNumber(e.target.value)}
+                        placeholder="Enter PO Number (Optional)"
                       />
                     </div>
 
@@ -634,18 +649,30 @@ const handleExportExcel = async () => {
 
                   {/* Items Table Grid */}
                   <div className="border-t border-gray-100 pt-4 mt-2">
-                    <div className="flex items-center justify-between mb-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                       <h4 className="text-xs font-bold text-smei-darkred uppercase tracking-wide">Supply Items List Grid</h4>
-                      {isEditMode && (
-                        <button
-                          type="button"
-                          onClick={handleAddItem}
-                          className="text-xs bg-red-50 hover:bg-red-100 text-smei-crimson border border-red-200 px-2.5 py-1 rounded font-semibold flex items-center gap-1"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                          <span>Add Item Row</span>
-                        </button>
-                      )}
+                      <div className="flex items-center gap-3">
+                        <label className="flex items-center gap-1.5 text-xs font-semibold text-gray-700 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            disabled={!isEditMode}
+                            checked={addNothingFollows}
+                            onChange={(e) => setAddNothingFollows(e.target.checked)}
+                            className="w-4 h-4 text-smei-crimson rounded border-gray-300 focus:ring-smei-crimson accent-smei-crimson"
+                          />
+                          <span>Add "*****NOTHING FOLLOWS*****" to the last item</span>
+                        </label>
+                        {isEditMode && (
+                          <button
+                            type="button"
+                            onClick={handleAddItem}
+                            className="text-xs bg-red-50 hover:bg-red-100 text-smei-crimson border border-red-200 px-2.5 py-1 rounded font-semibold flex items-center gap-1"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Add Item Row</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     {errors.items && <p className="text-xs text-rose-500 mb-2 font-semibold bg-rose-50 p-2 border-l-4 border-rose-500 rounded">{errors.items}</p>}
@@ -790,6 +817,25 @@ const handleExportExcel = async () => {
                               )}
                             </tr>
                           ))}
+                          {addNothingFollows && (
+                            <tr className="border-b border-gray-100 bg-gray-50/50 italic">
+                              <td className="p-1 text-center font-mono text-gray-400 text-xs">-</td>
+                              <td className="p-1 text-center text-gray-400 text-xs">-</td>
+                              <td className="p-1">
+                                <div className="p-1 font-semibold text-gray-500 italic text-xs">
+                                  *****NOTHING FOLLOWS*****
+                                </div>
+                              </td>
+                              <td className="p-1 text-center font-mono text-gray-400 text-xs">-</td>
+                              <td className="p-1 text-center font-mono text-gray-400 text-xs">-</td>
+                              <td className="p-1 text-center font-mono text-gray-400 text-xs">-</td>
+                              <td className="p-1 text-center font-mono text-gray-400 text-xs">-</td>
+                              <td className="p-1 text-center font-mono text-gray-400 text-xs">-</td>
+                              <td className="p-1 text-center font-mono text-gray-400 text-xs">-</td>
+                              <td className="p-1 text-center text-gray-400 text-xs">-</td>
+                              {isEditMode && <td className="p-1 text-center"></td>}
+                            </tr>
+                          )}
                         </tbody>
                       </table>
                     </div>

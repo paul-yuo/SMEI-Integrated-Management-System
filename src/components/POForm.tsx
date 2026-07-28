@@ -8,7 +8,7 @@ import { PurchaseOrder, POItem, Supplier, User, UserRole, POStatus, Signatory } 
 import { calculatePOFinancials } from "../store";
 import { api } from "../lib/api";
 import { motion } from "motion/react";
-import { ArrowLeft, Save, Send, CheckCircle2, AlertTriangle, Printer, Trash2, Plus, RefreshCw, PenTool, Check, FileCheck, CircleSlash, XCircle, FileText, FileSpreadsheet } from "lucide-react";
+import { ArrowLeft, Save, Send, CheckCircle2, AlertTriangle, Trash2, Plus, RefreshCw, PenTool, Check, FileCheck, CircleSlash, XCircle, FileText, FileSpreadsheet } from "lucide-react";
 import { exportPOToWord, exportPOToXLSM } from "../utils/wordExport";
 import { formatRFSNo } from "../utils/templateMapping";
 import { formatControlNumber } from "../utils/controlNumber";
@@ -252,6 +252,7 @@ export default function POForm({
       setCategory(po.category);
       setItems(po.items);
       setDiscountVatAmount(po.discountVatAmount);
+      setOverrideVat(!!po.overrideVat);
       
       setVatableAmount(po.vatableAmount);
       setVat12(po.vat12);
@@ -261,19 +262,8 @@ export default function POForm({
       setLaborEwt2(po.laborEwt2);
       
       // Load Parts and Labor EWT Percentages
-      let loadedPartsPct = 1.0;
-      let loadedLaborPct = 2.0;
-      
-      if (po.partsEwt1 > 0 || po.ewtType === "Parts EWT") {
-        loadedPartsPct = po.ewtPercentage !== undefined ? po.ewtPercentage : 1.0;
-        loadedLaborPct = po.laborEwt2 > 0 ? 2.0 : 0.0;
-      } else if (po.laborEwt2 > 0 || po.ewtType === "Labor EWT") {
-        loadedLaborPct = po.ewtPercentage !== undefined ? po.ewtPercentage : 2.0;
-        loadedPartsPct = po.partsEwt1 > 0 ? 1.0 : 0.0;
-      } else {
-        loadedPartsPct = 0.0;
-        loadedLaborPct = 0.0;
-      }
+      const loadedPartsPct = po.partsEwtPercentage !== undefined ? po.partsEwtPercentage : (po.ewtPercentage !== undefined && po.ewtType === "Parts EWT" ? po.ewtPercentage : 1.0);
+      const loadedLaborPct = po.laborEwtPercentage !== undefined ? po.laborEwtPercentage : (po.ewtPercentage !== undefined && po.ewtType === "Labor EWT" ? po.ewtPercentage : 2.0);
       
       setPartsEwtPercentage(loadedPartsPct);
       setLaborEwtPercentage(loadedLaborPct);
@@ -443,7 +433,7 @@ export default function POForm({
   };
 
   const currentGrossAmount = overrideVat
-    ? (vatableAmount + vat12 + vatExemptAmount + zeroRatedAmount + partsEwt1 + laborEwt2)
+    ? (vatableAmount + vat12 + vatExemptAmount + zeroRatedAmount)
     : computed.grossAmount;
 
   const currentTotalAmount = overrideVat
@@ -566,11 +556,11 @@ export default function POForm({
       poDate,
       deliveryDate,
       supplierId,
-      supplierName,
-      attention,
+      supplierName: supplierName.toUpperCase(),
+      attention: attention.toUpperCase(),
       telNo,
       faxNo,
-      purpose,
+      purpose: purpose.toUpperCase(),
       category,
       poCategory: poCategory === "Others" ? otherPoCategory : poCategory,
       items: items.map(item => ({
@@ -580,6 +570,7 @@ export default function POForm({
         amount: typeof item.amount === "number" ? item.amount : (parseFloat(item.amount) || 0),
       })),
       
+      overrideVat,
       vatableAmount,
       vat12,
       vatExemptAmount,
@@ -742,10 +733,6 @@ export default function POForm({
     setShowSignaturePad(false);
   };
 
-  const handlePrint = () => {
-    window.print();
-  };
-
   const formatPHP = (val: number) => {
     return `${currencySymbol} ${val.toLocaleString("en-US", {
       minimumFractionDigits: 2,
@@ -794,6 +781,7 @@ export default function POForm({
       laborEwt2,
       partsEwtPercentage,
       laborEwtPercentage,
+      overrideVat,
       ewtType: "Parts & Labor EWT",
       ewtPercentage: partsEwtPercentage,
       excludePreparedBy,
@@ -814,7 +802,7 @@ export default function POForm({
     warrantyOthers, remarks, preparedBy, checkedBy, verifiedBy, verifiedBy2,
     approvedBy, conforme, totalAmount, status, discountVatAmount, vatableAmount,
     vat12, vatExemptAmount, zeroRatedAmount, partsEwt1, laborEwt2,
-    partsEwtPercentage, laborEwtPercentage,
+    partsEwtPercentage, laborEwtPercentage, overrideVat,
     excludePreparedBy, excludeCheckedBy, excludeVerifiedBy, excludeVerifiedBy2,
     excludeApprovedBy, excludeConforme, additionalSignatories, signatureUrl,
     currentUser
@@ -834,38 +822,6 @@ export default function POForm({
         </button>
 
         <div className="flex flex-wrap items-center gap-2">
-          {!isNew && (
-            <div className="flex flex-col gap-1.5">
-              {po && (
-                <div className="flex flex-col sm:flex-row gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => exportPOToXLSM(po)}
-                    className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs py-2 px-3.5 rounded-xl shadow-sm transition-all"
-                  >
-                    <FileSpreadsheet className="w-4 h-4" />
-                    <span>Export Excel (.XLSM)</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => exportPOToWord(po)}
-                    className="inline-flex items-center gap-1.5 bg-[#2B579A] hover:bg-[#1C3A6A] text-white font-semibold text-xs py-2 px-3.5 rounded-xl shadow-sm transition-all"
-                  >
-                    <FileText className="w-4 h-4" />
-                    <span>Export Word (.DOCX)</span>
-                  </button>
-                </div>
-              )}
-              <button
-                onClick={handlePrint}
-                className="inline-flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white font-semibold text-xs py-2 px-3.5 rounded-xl shadow-sm transition-all justify-center"
-              >
-                <Printer className="w-4 h-4" />
-                <span>Print</span>
-              </button>
-            </div>
-          )}
-
           {/* Workflow approval buttons */}
           {po && po.status !== "Approved" && po.status !== "Cancelled" && (
             <div className="flex flex-wrap items-center gap-2 bg-gray-50 p-1.5 rounded-xl border border-gray-200">
@@ -977,54 +933,7 @@ export default function POForm({
             </div>
             <div className="text-[10px] text-gray-500 font-semibold font-mono flex items-center justify-center md:justify-end gap-2">
               <span>Status:</span>
-              <select
-                value={status}
-                onChange={(e) => {
-                  const newStatus = e.target.value as POStatus;
-                  if (status === "Approved" && !isAdmin) {
-                    let requiredPin = "1234";
-                    let isPinRequired = false;
-                    try {
-                      const savedSetting = localStorage.getItem("smei_security_config");
-                      const globalEnabled = savedSetting === null ? false : JSON.parse(savedSetting).enabled;
-
-                      if (globalEnabled) {
-                        const saved = localStorage.getItem("smei_module_pins");
-                        if (saved) {
-                          const rules = JSON.parse(saved);
-                          const rule = rules.find((r: any) => r.id === "po_status_change");
-                          if (rule) {
-                            requiredPin = rule.pinCode;
-                            isPinRequired = rule.isEnabled;
-                          }
-                        } else {
-                          isPinRequired = true;
-                        }
-                      }
-                    } catch (e) {
-                      console.error("Failed to parse module pin configuration", e);
-                    }
-
-                    if (isPinRequired) {
-                      const pin = prompt("Admin PIN code required to change an Approved PO status:");
-                      if (pin !== requiredPin) {
-                        alert("Invalid PIN. Status not changed.");
-                        return;
-                      }
-                    }
-                  }
-                  setStatus(newStatus);
-                }}
-                disabled={isViewer || (!isAdmin && status === "Approved")}
-                className="uppercase text-smei-crimson font-extrabold bg-transparent border-b border-dashed border-red-200 hover:border-red-400 focus:outline-none cursor-pointer py-0.5 print:appearance-none print:border-none print:text-right"
-              >
-                <option value="Draft">DRAFT</option>
-                <option value="Pending Review">PENDING REVIEW</option>
-                <option value="Pending Approval">PENDING APPROVAL</option>
-                <option value="Approved">APPROVED</option>
-                <option value="Rejected">REJECTED</option>
-                <option value="Cancelled">CANCELLED</option>
-              </select>
+              <span className="uppercase text-smei-crimson font-extrabold">{status}</span>
             </div>
           </div>
         </div>
@@ -1049,7 +958,7 @@ export default function POForm({
                     disabled={status !== "Draft" && !isAdmin}
                     value={supplierName}
                     onChange={(e) => {
-                      const value = e.target.value;
+                      const value = e.target.value.toUpperCase();
                       setSupplierName(value);
                       setSupplierId(""); // Clear supplier ID since it's a typed search/new name
                       setShowSuggestions(true);
@@ -1190,8 +1099,8 @@ export default function POForm({
                   type="text"
                   disabled={status !== "Draft" && !isAdmin}
                   value={attention}
-                  onChange={(e) => setAttention(e.target.value)}
-                  placeholder="e.g. Arthur Santos"
+                  onChange={(e) => setAttention(e.target.value.toUpperCase())}
+                  placeholder="e.g. ARTHUR SANTOS"
                   className="w-full px-3.5 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-1.5 focus:ring-smei-crimson disabled:bg-gray-100"
                 />
               </div>
@@ -1222,10 +1131,10 @@ export default function POForm({
                   disabled={status !== "Draft" && !isAdmin}
                   value={purpose}
                   onChange={(e) => {
-                    setPurpose(e.target.value);
+                    setPurpose(e.target.value.toUpperCase());
                     if (errors.purpose) setErrors(prev => ({ ...prev, purpose: "" }));
                   }}
-                  placeholder="e.g. Structural steel reinforcement support girders"
+                  placeholder="e.g. STRUCTURAL STEEL REINFORCEMENT SUPPORT GIRDERS"
                   className={`w-full px-3.5 py-2 ${errors.purpose ? 'bg-red-50 border-red-500' : 'bg-gray-50 border-gray-200'} border rounded-xl focus:outline-none focus:ring-1.5 focus:ring-smei-crimson disabled:bg-gray-100`}
                 />
                 {errors.purpose && (
@@ -1746,9 +1655,9 @@ export default function POForm({
                 />
               </div>
 
-              {/* Total Amount */}
+              {/* Items Subtotal */}
               <div className="flex items-center justify-between">
-                <span className="text-gray-500 font-medium">Total Amount</span>
+                <span className="text-gray-500 font-medium">Items Subtotal</span>
                 <span className="font-mono font-bold text-gray-800 pr-2">
                   {formatPHP(overrideVat ? (vatableAmount + vat12 + vatExemptAmount + zeroRatedAmount) : (computed.vatableAmount + computed.vat12 + computed.vatExemptAmount + computed.zeroRatedAmount))}
                 </span>

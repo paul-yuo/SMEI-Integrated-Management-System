@@ -121,6 +121,7 @@ export default function TimestampModule() {
   const saveToStorage = (updated: TimestampRecord[]) => {
     setRecords(updated);
     localStorage.setItem("tsd_timestamp_records", JSON.stringify(updated));
+    window.dispatchEvent(new Event("tsd_data_changed"));
   };
 
   const handleTriggerUpload = () => {

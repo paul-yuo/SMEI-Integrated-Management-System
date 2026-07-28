@@ -3,16 +3,18 @@ import { Lock, ShieldAlert, CheckCircle2, ArrowRight } from "lucide-react";
 import { User, UserRole } from "../types";
 
 interface ModuleSecurityGateProps {
-  moduleName: "Purchase Order" | "Request For Supply" | "Payment Instruction Slip" | "Canvass Sheet" | "Request For Supply (RFS) Approval";
+  moduleName: string;
+  gateKey?: string;
   currentUser: User;
   children: React.ReactNode;
 }
 
-export default function ModuleSecurityGate({ moduleName, currentUser, children }: ModuleSecurityGateProps) {
+export default function ModuleSecurityGate({ moduleName, gateKey, currentUser, children }: ModuleSecurityGateProps) {
   const [isLocked, setIsLocked] = useState(false);
   const [pinInput, setPinInput] = useState("");
   const [error, setError] = useState("");
   const [requiredPin, setRequiredPin] = useState("");
+  const [activeRuleId, setActiveRuleId] = useState<string>("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -22,7 +24,7 @@ export default function ModuleSecurityGate({ moduleName, currentUser, children }
       return;
     }
 
-    // Check if security rule is enabled for this module
+    // Check if security rule is enabled for this module / gateKey
     const checkSecurity = () => {
       try {
         const savedSetting = localStorage.getItem("smei_security_config");
@@ -33,53 +35,62 @@ export default function ModuleSecurityGate({ moduleName, currentUser, children }
           return;
         }
 
+        const targetKey = gateKey || moduleName;
         const saved = localStorage.getItem("smei_module_pins");
+        let rule: any = null;
+
         if (saved) {
           const rules = JSON.parse(saved);
-          // Find any rule that is enabled for this module name
-          const rule = rules.find(
-            (r: any) => r.moduleName === moduleName && r.isEnabled === true
-          );
-          
-          if (rule) {
-            setRequiredPin(rule.pinCode);
-            
-            // Check session storage if already unlocked in this session
-            const isUnlockedInSession = sessionStorage.getItem("smei_session_unlocked") === "true";
-            if (isUnlockedInSession) {
-              setIsLocked(false);
-            } else {
-              setIsLocked(true);
-            }
-          } else {
-            setIsLocked(false);
-          }
-        } else {
-          // Default initial settings
-          let isRuleEnabled = true;
-          let defaultPin = "1234";
-          if (moduleName === "Purchase Order") {
-            defaultPin = "1234";
-          } else if (moduleName === "Request For Supply") {
-            defaultPin = "5678";
-          } else if (moduleName === "Request For Supply (RFS) Approval") {
-            defaultPin = "7777";
-          } else if (moduleName === "Payment Instruction Slip") {
-            defaultPin = "4321";
-          } else if (moduleName === "Canvass Sheet") {
-            defaultPin = "9999";
-          } else {
-            isRuleEnabled = false;
-          }
-
-          setRequiredPin(defaultPin);
-          if (isRuleEnabled) {
-            const isUnlockedInSession = sessionStorage.getItem("smei_session_unlocked") === "true";
-            setIsLocked(!isUnlockedInSession);
-          } else {
-            setIsLocked(false);
+          // Look for rule by ID first
+          rule = rules.find((r: any) => r.id === targetKey);
+          if (!rule) {
+            // Fallback to lookup by module name
+            rule = rules.find((r: any) => r.moduleName === targetKey || r.moduleName === moduleName);
           }
         }
+
+        if (rule) {
+          if (rule.isEnabled === false) {
+            setIsLocked(false);
+            return;
+          }
+          setRequiredPin(rule.pinCode);
+          setActiveRuleId(rule.id || targetKey);
+
+          const unlockKey = `smei_unlocked_${rule.id || targetKey}`;
+          const isUnlockedInSession = sessionStorage.getItem(unlockKey) === "true";
+          setIsLocked(!isUnlockedInSession);
+          return;
+        }
+
+        // Default initial fallback PINs per isolated module gate
+        let pinToUse = "";
+        let ruleIdToUse = targetKey;
+
+        if (targetKey === "po_approval_gate" || moduleName === "PO Approval") {
+          pinToUse = "1234";
+          ruleIdToUse = "po_approval_gate";
+        } else if (targetKey === "pis_approval_gate" || moduleName === "PIS Approval") {
+          pinToUse = "5678";
+          ruleIdToUse = "pis_approval_gate";
+        } else if (targetKey === "rfs_approval_gate" || moduleName === "RFS Approval") {
+          pinToUse = "9012";
+          ruleIdToUse = "rfs_approval_gate";
+        } else if (targetKey === "canvass_approval_gate" || moduleName === "Canvass Approval") {
+          pinToUse = "3456";
+          ruleIdToUse = "canvass_approval_gate";
+        } else {
+          pinToUse = "1234";
+          ruleIdToUse = targetKey;
+        }
+
+        setRequiredPin(pinToUse);
+        setActiveRuleId(ruleIdToUse);
+
+        // Session check specific to this gate key / rule ID
+        const unlockKey = `smei_unlocked_${ruleIdToUse}`;
+        const isUnlockedInSession = sessionStorage.getItem(unlockKey) === "true";
+        setIsLocked(!isUnlockedInSession);
       } catch (err) {
         console.error("Failed to parse module pin configuration", err);
         setIsLocked(false);
@@ -88,12 +99,11 @@ export default function ModuleSecurityGate({ moduleName, currentUser, children }
 
     checkSecurity();
 
-    // Add event listener to recheck when rules are modified in other tabs or components
     window.addEventListener("storage", checkSecurity);
     return () => {
       window.removeEventListener("storage", checkSecurity);
     };
-  }, [moduleName, currentUser]);
+  }, [moduleName, gateKey, currentUser]);
 
   // Handle focus on lock mount
   useEffect(() => {
@@ -124,14 +134,14 @@ export default function ModuleSecurityGate({ moduleName, currentUser, children }
     if (!pinInput) return;
 
     if (pinInput === requiredPin) {
-      // Unlock module and authorize the entire session
+      // Unlock module gate for this specific rule / gate key
       setIsLocked(false);
-      sessionStorage.setItem("smei_session_unlocked", "true");
-      sessionStorage.setItem(`smei_unlocked_${moduleName}`, "true");
+      const unlockKey = `smei_unlocked_${activeRuleId || gateKey || moduleName}`;
+      sessionStorage.setItem(unlockKey, "true");
       setPinInput("");
       setError("");
       
-      // Dispatch storage event so other open security gates automatically unlock
+      // Dispatch storage event so other components update if needed
       window.dispatchEvent(new Event("storage"));
     } else {
       setError("Invalid Administrative PIN code. Please try again.");
